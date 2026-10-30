@@ -1,6 +1,6 @@
 import * as THREE from '../vendor/three.module.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY } from './data.js';
+import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY, LAW_GROUPS } from './data.js';
 import { COMPANY_STAFF, LEGAL_SOURCES, formatViDate, formatViTime, getDailyPlan, loadAIState, saveAIState } from './hr-ai.js';
 import { buildWorld, FLOOR_Y } from './world.js';
 
@@ -106,7 +106,7 @@ for (const d of DEPARTMENTS) {
 }
 
 const WALK_SPEED = 5.4;
-const STAFF_SIDE = { director: -1 };
+const STAFF_SIDE = { director: -1, hr: -1, accounting: 1 };
 
 function walkSpeed() {
   return WALK_SPEED * state.speed;
@@ -342,6 +342,43 @@ function setStepState(id, s) {
 
 // ------------------------------------------------------------ dept card
 
+function membersOf(d) {
+  return d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
+}
+
+function staffListHTML(d) {
+  return `<div class="staff-list">${membersOf(d).map((m) => `
+    <div class="staff">
+      <div class="staff-row"><strong>${m.name}</strong><span>${m.role}</span></div>
+      ${m.scope ? `<em class="staff-scope">${m.scope}</em>` : ''}
+    </div>`).join('')}</div>`;
+}
+
+function lawBlockHTML(key) {
+  const g = LAW_GROUPS[key];
+  if (!g) return '';
+  return `<details class="law-box">
+      <summary><span>${g.label}</span><b>${g.docs.length} văn bản</b></summary>
+      <p>${g.note}</p>
+      <ul>${g.docs.map((doc) => `<li><b>${doc.code}${doc.ref ? ` · ${doc.ref}` : ''}</b><span>${doc.note}</span></li>`).join('')}</ul>
+    </details>`;
+}
+
+function lawStackHTML(d) {
+  const blocks = membersOf(d).filter((m) => m.lawGroup).map((m) => lawBlockHTML(m.lawGroup)).join('');
+  return blocks ? `<div class="law-stack">${blocks}</div>` : '';
+}
+
+function setDeptActive(id, on) {
+  const d = DEPT_MAP[id];
+  if (!d) return;
+  world.rooms[id].active = on;
+  for (const m of membersOf(d)) {
+    const p = world.people[m.id];
+    if (p) p.active = on;
+  }
+}
+
 function renderCard(d) {
   ui.card.classList.remove('is-ai');
   if (d.id === 'hr') {
@@ -357,12 +394,10 @@ function renderCard(d) {
         <h2>${d.name}</h2>
       </div>
     </div>
-    <div class="staff">
-      <strong>${d.staff}</strong>
-      <span>${d.role}</span>
-    </div>
+    ${staffListHTML(d)}
     <p class="desc">${d.desc}</p>
     <div class="duties">${d.duties.map((x) => `<span>${x}</span>`).join('')}</div>
+    ${lawStackHTML(d)}
     <div class="stats">
       <div><strong id="statIn">${state.stats[d.id].in}</strong><span>Hồ sơ nhận</span></div>
       <div><strong id="statOut">${state.stats[d.id].out}</strong><span>Hoàn tất</span></div>
@@ -387,10 +422,8 @@ function renderHRCard(d) {
         <h2>${d.name}</h2>
       </div>
     </div>
-    <div class="staff">
-      <strong>${d.staff}</strong>
-      <span>${d.role}</span>
-    </div>
+    ${staffListHTML(d)}
+    ${lawStackHTML(d)}
     <div class="ai-panel">
       <div class="ai-head">
         <span class="ai-badge"><span class="ai-dot"></span>AI NHÂN SỰ</span>
@@ -655,10 +688,7 @@ function moveToken(curve, colorHex, runId) {
 function resetFlowData() {
   state.stats = Object.fromEntries(DEPARTMENTS.map((d) => [d.id, { in: 0, out: 0 }]));
   FLOW_ORDER.forEach((id) => setStepState(id, 'pending'));
-  DEPARTMENTS.forEach((d) => {
-    world.rooms[d.id].active = false;
-    world.people[d.id].active = false;
-  });
+  DEPARTMENTS.forEach((d) => setDeptActive(d.id, false));
   world.resetPeople();
   state.carrier = null;
   state.tokenGoal = null;
@@ -679,8 +709,7 @@ function abortFlow() {
   hideBubble();
   for (const id of FLOW_ORDER) {
     if (state.stepStatus[id] === 'active') setStepState(id, 'pending');
-    world.rooms[id].active = false;
-    world.people[id].active = false;
+    setDeptActive(id, false);
   }
   world.resetPeople();
   clearTrails();
@@ -775,8 +804,7 @@ async function runFlow() {
     await wait(340 / state.speed, runId);
     if (runId !== state.runId) return;
 
-    world.rooms[id].active = true;
-    world.people[id].active = true;
+    setDeptActive(id, true);
     state.stats[id].in += 1;
     updateStatsUI(id);
 
@@ -787,8 +815,7 @@ async function runFlow() {
 
     state.stats[id].out += 1;
     updateStatsUI(id);
-    world.rooms[id].active = false;
-    world.people[id].active = false;
+    setDeptActive(id, false);
     setStepState(id, 'done');
     addLog(id, '✔ ' + d.done);
     hideBubble();

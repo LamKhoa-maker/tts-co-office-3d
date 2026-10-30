@@ -80,11 +80,31 @@ function labelTexture(d) {
     ctx.fillText(d.name, 126, h / 2 - 20);
     ctx.fillStyle = 'rgba(203,213,225,0.82)';
     ctx.font = '500 29px "Segoe UI", "Helvetica Neue", sans-serif';
-    ctx.fillText(d.staff, 126, h / 2 + 28);
+    ctx.fillText(d.labelStaff || d.staff, 126, h / 2 + 28);
     ctx.textAlign = 'right';
     ctx.font = '62px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
     ctx.fillText(d.icon, w - 56, h / 2 + 2);
     ctx.textAlign = 'left';
+  });
+}
+
+function staffTagTexture(name, role, color) {
+  return canvasTexture(512, 140, (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(15,23,42,0.92)';
+    roundRectPath(ctx, 4, 4, w - 8, h - 8, 34);
+    ctx.fill();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(48, h / 2, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = '600 33px "Segoe UI", "Helvetica Neue", sans-serif';
+    ctx.fillText(name, 76, h / 2 - 17);
+    ctx.fillStyle = 'rgba(203,213,225,0.85)';
+    ctx.font = '500 24px "Segoe UI", "Helvetica Neue", sans-serif';
+    ctx.fillText(role, 76, h / 2 + 21);
   });
 }
 
@@ -129,6 +149,8 @@ function screenTexture(kind, color) {
       kind === 'chart' ? 'BÁO GIÁ DỰ ÁN' :
       kind === 'ledger' ? 'SỔ TỔNG HỢP' :
       kind === 'org' ? 'HỒ SƠ NHÂN SỰ' :
+      kind === 'legal' ? 'VĂN BẢN PHÁP CHẾ' :
+      kind === 'tax' ? 'SỔ THUẾ & HÓA ĐƠN' :
       kind === 'ai' ? 'AI NHÂN SỰ' : 'BẢNG ĐIỀU HÀNH';
     ctx.fillText(title, 14, 17);
 
@@ -208,6 +230,50 @@ function screenTexture(kind, color) {
       ctx.fillStyle = 'rgba(153,246,228,0.65)';
       ctx.font = '600 9px "Segoe UI", sans-serif';
       ctx.fillText('2 VIỆC ƯU TIÊN HÔM NAY', 16, 184);
+    } else if (kind === 'legal') {
+      const docs = ['Điều lệ & nghị quyết', 'Đăng ký doanh nghiệp'];
+      docs.forEach((label, i) => {
+        const y = 40 + i * 48;
+        ctx.fillStyle = 'rgba(148,163,184,0.12)';
+        roundRectPath(ctx, 16, y, w - 32, 38, 8);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(226,232,240,0.85)';
+        ctx.font = '600 11px "Segoe UI", sans-serif';
+        ctx.fillText(label, 30, y + 24);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(w - 44, y + 19, 9, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.strokeStyle = 'rgba(248,113,113,0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(84, 164, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(248,113,113,0.8)';
+      ctx.font = '600 8px "Segoe UI", sans-serif';
+      ctx.fillText('ĐÃ RÀ SOÁT', 52, 167);
+      ctx.fillStyle = 'rgba(148,163,184,0.55)';
+      ctx.font = '9px "Segoe UI", sans-serif';
+      ctx.fillText('HỒ SƠ PHÁP LÝ DOANH NGHIỆP', 118, 168);
+    } else if (kind === 'tax') {
+      const rows = [['Thuế GTGT', '10%'], ['Thuế TNDN', '20%'], ['Thuế TNCN', 'Lũy tiến']];
+      rows.forEach(([label, val], i) => {
+        const y = 40 + i * 38;
+        ctx.fillStyle = i % 2 ? 'rgba(148,163,184,0.06)' : 'rgba(148,163,184,0.12)';
+        ctx.fillRect(16, y, w - 32, 30);
+        ctx.fillStyle = 'rgba(226,232,240,0.85)';
+        ctx.font = '600 11px "Segoe UI", sans-serif';
+        ctx.fillText(label, 28, y + 20);
+        ctx.fillStyle = color;
+        ctx.textAlign = 'right';
+        ctx.fillText(val, w - 28, y + 20);
+        ctx.textAlign = 'left';
+      });
+      ctx.fillStyle = 'rgba(153,246,228,0.6)';
+      ctx.font = '600 9px "Segoe UI", sans-serif';
+      ctx.fillText('KÊ KHAI THÁNG 10/2026', 16, 186);
     } else if (kind === 'org') {
       ctx.strokeStyle = 'rgba(148,163,184,0.5)';
       ctx.lineWidth = 1.5;
@@ -928,8 +994,8 @@ function buildRoom(scene, world, d) {
       })
     );
     holo.scale.set(2.2, 0.69, 1);
-    holo.position.set(posX + 3.5, 2.45, posZ - 1.9);
-    holo.userData.baseY = 2.45;
+    holo.position.set(posX + 3.5, 2.95, posZ - 1.9);
+    holo.userData.baseY = 2.95;
     holo.renderOrder = 21;
     g.add(holo);
     world.aiHolo = holo;
@@ -983,6 +1049,60 @@ function buildRoom(scene, world, d) {
     addFilingCabinet(g, posX + 4.6, posZ - 1.3, -Math.PI / 2);
     addShelf(g, posX - 4.35, backZ + 0.5);
     addPlant(g, posX - 4.7, posZ + 3.4, 0.95);
+  }
+
+  // second workstation for two-person rooms (Nhân sự, Kế toán)
+  const members = d.staffList || [];
+  if (members.length > 1) {
+    const side = d.extraSide || 1;
+    const extraX = posX + side * 3.55;
+    const extraZ = posZ - 2.45;
+    const desk2 = addDesk(g, extraX, posZ - 1.5, 2.4, 1.35);
+    box(desk2, 0.7, 0.03, 0.22, M.keyboard, 0, 0.795, 0.33, { cast: false });
+    const mouse2 = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), M.keyboard);
+    mouse2.scale.set(0.8, 0.5, 1.2);
+    mouse2.position.set(0.52, 0.805, 0.33);
+    desk2.add(mouse2);
+    screens.push(addMonitor(desk2, 0, -0.28, { kind: d.id === 'hr' ? 'legal' : 'tax', color: colorCss }));
+    if (d.id === 'hr') addPaperStack(desk2, 0.62, 0.26, 2, 0.12);
+    else addPaperStack(desk2, -0.58, 0.26, 3, 0.1);
+
+    addChair(g, extraX, extraZ, 0, false);
+    const look = members[1].look || {};
+    const person2 = createPerson({
+      shirt: d.colorHex,
+      skin: look.skin || '#e6b489',
+      hair: look.hair || '#1f2937',
+      style: look.style || 'short',
+      tie: Boolean(look.tie),
+    });
+    person2.group.position.set(extraX, FLOOR_Y + SEAT_DROP, extraZ);
+    g.add(person2.group);
+
+    world.people[members[1].id] = {
+      ...person2,
+      active: false,
+      baseY: FLOOR_Y,
+      home: new THREE.Vector3(extraX, FLOOR_Y, extraZ),
+      walk: null,
+      standing: false,
+      lookYaw: null,
+      yOff: SEAT_DROP,
+    };
+
+    members.forEach((m, i) => {
+      const tag = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: staffTagTexture(m.name, m.role, colorCss),
+          transparent: true,
+          depthWrite: false,
+        })
+      );
+      tag.scale.set(2.0, 0.55, 1);
+      tag.position.set(i === 0 ? posX : extraX, 1.95, posZ - 2.5);
+      tag.renderOrder = 19;
+      g.add(tag);
+    });
   }
 
   // room label
@@ -1320,14 +1440,13 @@ export function buildWorld(scene) {
   };
 
   world.resetPeople = () => {
-    for (const d of DEPARTMENTS) world.parkPerson(d.id);
+    for (const id of Object.keys(world.people)) world.parkPerson(id);
   };
 
-  world.hasWalkers = () => DEPARTMENTS.some((d) => Boolean(world.people[d.id]?.walk));
+  world.hasWalkers = () => Object.values(world.people).some((p) => p.walk);
 
   world.update = (t, dt) => {
-    for (const d of DEPARTMENTS) {
-      const p = world.people[d.id];
+    for (const p of Object.values(world.people)) {
       if (!p) continue;
       if (p.walk) {
         updateWalk(p, dt);
