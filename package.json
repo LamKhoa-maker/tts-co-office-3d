@@ -1,0 +1,10 @@
+{
+  "name": "tts-co-office-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mô hình văn phòng 3D 5 phòng ban của TTS.Co",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

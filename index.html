@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#eef4fb" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>TTS.Co · Mô hình văn phòng 3D</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f172a'/%3E%3Ctext x='32' y='42' font-family='Segoe UI,sans-serif' font-size='26' font-weight='700' fill='%23e11d48' text-anchor='middle'%3ETTS%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <canvas id="scene" aria-label="Mô hình văn phòng 3D của TTS.Co"></canvas>
+
+  <div id="ui">
+    <header class="brand glass">
+      <div class="brand-mark">TTS</div>
+      <div class="brand-text">
+        <h1>TTS.Co <span>· Mô hình văn phòng 3D</span></h1>
+        <p>5 phòng ban · 1 nhân sự / phòng · Quy trình khép kín</p>
+      </div>
+    </header>
+
+    <div class="topbar glass">
+      <div class="status" id="statusChip" data-state="idle">
+        <span class="dot"></span>
+        <span id="statusText">Sẵn sàng</span>
+      </div>
+      <button id="btnRun" class="btn primary" type="button">
+        <span class="ico">▶</span><span class="label">Chạy quy trình</span>
+      </button>
+      <button id="btnSpeed" class="btn mono" type="button" title="Tốc độ mô phỏng">1×</button>
+      <button id="btnRotate" class="btn square" type="button" title="Xoay tự động">⟳</button>
+      <button id="btnReset" class="btn square" type="button" title="Về góc nhìn mặc định">⌂</button>
+    </div>
+
+    <aside id="deptCard" class="panel glass hidden" aria-live="polite"></aside>
+
+    <aside class="panel glass log-panel">
+      <div class="panel-head">
+        <h2><span class="live-dot"></span>Nhật ký hoạt động</h2>
+        <span class="log-count" id="logCount">0</span>
+      </div>
+      <ul id="logList"></ul>
+    </aside>
+
+    <div class="flow glass">
+      <span class="flow-label">Quy trình</span>
+      <div class="flow-steps" id="flowSteps"></div>
+    </div>
+
+    <div id="bubble" class="bubble hidden"></div>
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
