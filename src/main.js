@@ -30,9 +30,9 @@ const world = buildWorld(scene, roster.extras);
 
 // ------------------------------------------------------------ controls
 
-const DEFAULT_TARGET = new THREE.Vector3(2.2, 0.6, 0.6);
-const VIEW_DIR = new THREE.Vector3(28, 36, 34).normalize();
-const PORTRAIT_VIEW_DIR = new THREE.Vector3(20, 50, 22).normalize();
+const DEFAULT_TARGET = new THREE.Vector3(0.5, 0.5, -3.3);
+const VIEW_DIR = new THREE.Vector3(12, 44, 40).normalize();
+const PORTRAIT_VIEW_DIR = new THREE.Vector3(10, 56, 28).normalize();
 
 function viewDir() {
   const p = THREE.MathUtils.clamp((1.1 - camera.aspect) / 0.6, 0, 1);
@@ -41,8 +41,8 @@ function viewDir() {
 
 function defaultDistance() {
   const vFov = THREE.MathUtils.degToRad(camera.fov);
-  const dH = 28 / (Math.tan(vFov / 2) * Math.max(camera.aspect, 0.45));
-  const dV = 17 / Math.tan(vFov / 2);
+  const dH = 21.5 / (Math.tan(vFov / 2) * Math.max(camera.aspect, 0.45));
+  const dV = 14 / Math.tan(vFov / 2);
   return THREE.MathUtils.clamp(Math.max(dH, dV) * 1.06, 32, 154);
 }
 
@@ -191,7 +191,7 @@ function buildEntryRoute(to) {
   const faceZ = innerDoorZ(to) + (to.posZ < 0 ? 0.55 : -0.55);
   return new THREE.CatmullRomCurve3([
     new THREE.Vector3(ENTRY.x, 1.55, ENTRY.z),
-    new THREE.Vector3(ENTRY.x, 2.2, 8.5),
+    new THREE.Vector3(ENTRY.x, 2.2, ENTRY.z - 3.4),
     new THREE.Vector3(ENTRY.x, 2.35, WORLD.corridorZ),
     new THREE.Vector3(to.posX, 2.2, WORLD.corridorZ),
     new THREE.Vector3(to.posX, 1.62, outerDoorZ(to)),
@@ -778,17 +778,20 @@ function deselect() {
 
 function setViewLocked(on) {
   state.viewLocked = on;
-  controls.enabled = !on;
+  controls.enabled = true;
+  controls.enableRotate = !on;
+  controls.enablePan = false;
+  controls.enableZoom = true;
   ui.lock.classList.toggle('active', on);
   ui.lock.setAttribute('aria-pressed', String(on));
-  ui.lock.title = on ? 'Mở khoá góc nhìn' : 'Khoá góc nhìn ban đầu';
+  ui.lock.title = on ? 'Mở khoá góc nhìn' : 'Khoá góc nhìn ban đầu · vẫn thu phóng được';
   ui.rotate.disabled = on;
   if (on) {
     controls.autoRotate = false;
     ui.rotate.classList.remove('active');
     deselect();
     focusCamera(defaultPos(), DEFAULT_TARGET);
-    showToast('Đã khoá góc nhìn ban đầu · Bấm lại để mở khoá', 3000);
+    showToast('Đã khoá góc nhìn · Cuộn hoặc chụm 2 ngón để thu phóng', 3200);
   } else {
     showToast('Đã mở khoá góc nhìn · Kéo chuột để xoay tự do', 2400);
   }

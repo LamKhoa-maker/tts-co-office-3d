@@ -5,6 +5,7 @@ export const FLOOR_Y = 0.1;
 
 const SEAT_DROP = -0.09;
 const MAX_STAFF = 3;
+const DETAIL_SCALE = 1.12;
 
 const WHITE = new THREE.Color(0xffffff);
 
@@ -471,6 +472,9 @@ function initMaterials() {
     cyan: new THREE.MeshStandardMaterial({ color: 0x0891b2, roughness: 0.7 }),
     pants: new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9 }),
     shoe: new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.6 }),
+    glass: new THREE.MeshStandardMaterial({
+      color: 0xbfd9ee, transparent: true, opacity: 0.26, roughness: 0.12, metalness: 0.15, depthWrite: false,
+    }),
   };
 }
 
@@ -532,21 +536,21 @@ function dashedFloorLine(points, color = 0x94a3b8, opacity = 0.45) {
 // ---------------------------------------------------------------- environment
 
 function addGround(scene) {
-  const slab = new THREE.Mesh(new THREE.BoxGeometry(52, 0.6, 38), M.slab);
-  slab.position.set(0, -0.3, 1);
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(40, 0.6, 26), M.slab);
+  slab.position.set(0, -0.3, -2.2);
   slab.receiveShadow = true;
   slab.castShadow = true;
   scene.add(slab);
 
   const tex = floorTexture();
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(16, 12);
+  tex.repeat.set(12, 8);
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(52, 38),
+    new THREE.PlaneGeometry(40, 26),
     new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 })
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, 0.004, 1);
+  floor.position.set(0, 0.004, -2.2);
   floor.receiveShadow = true;
   scene.add(floor);
 }
@@ -580,6 +584,7 @@ function addLights(scene) {
 function addDesk(parent, x, z, w = 3.2, d = 1.5) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
+  g.scale.setScalar(DETAIL_SCALE);
   parent.add(g);
   box(g, w, 0.08, d, M.white, 0, 0.74, 0);
   box(g, w - 0.4, 0.36, 0.06, tintMat(0x94a3b8, 0.55), 0, 0.52, -d / 2 + 0.14);
@@ -644,7 +649,7 @@ function addChair(parent, x, z, rotY = 0, exec = false) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
   g.rotation.y = rotY;
-  if (exec) g.scale.setScalar(1.12);
+  g.scale.setScalar(DETAIL_SCALE * (exec ? 1.08 : 1));
   parent.add(g);
   const mat = exec ? M.chairExec : M.chair;
   cyl(g, 0.36, 0.4, 0.05, 18, M.metal, 0, 0.06, 0);
@@ -658,6 +663,7 @@ function addShelf(parent, x, z, rotY = 0) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
   g.rotation.y = rotY;
+  g.scale.setScalar(DETAIL_SCALE);
   parent.add(g);
   box(g, 1.9, 0.07, 0.42, M.woodDark, 0, 1.98, 0);
   box(g, 1.9, 0.09, 0.42, M.woodDark, 0, 0.12, 0);
@@ -682,7 +688,7 @@ let plantSink = null;
 function addPlant(parent, x, z, s = 1) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
-  g.scale.setScalar(s);
+  g.scale.setScalar(s * 1.1);
   parent.add(g);
   cyl(g, 0.25, 0.3, 0.4, 14, M.pot, 0, 0.2, 0);
   cyl(g, 0.24, 0.24, 0.03, 14, M.soil, 0, 0.4, 0);
@@ -707,6 +713,7 @@ function addFilingCabinet(parent, x, z, rotY = 0) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
   g.rotation.y = rotY;
+  g.scale.setScalar(DETAIL_SCALE);
   parent.add(g);
   box(g, 0.95, 1.5, 0.55, M.cabinet, 0, 0.75, 0);
   for (let i = 0; i < 3; i++) {
@@ -734,6 +741,7 @@ function addWhiteboard(parent, x, z, rotY, color) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
   g.rotation.y = rotY;
+  g.scale.setScalar(DETAIL_SCALE);
   parent.add(g);
   box(g, 2.3, 1.35, 0.06, M.screenBody, 0, 1.42, 0);
   const tex = boardTexture(color);
@@ -753,6 +761,7 @@ function addArmchair(parent, x, z, rotY, color) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
   g.rotation.y = rotY;
+  g.scale.setScalar(DETAIL_SCALE);
   parent.add(g);
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.9 });
   box(g, 0.95, 0.32, 0.9, mat, 0, 0.36, 0);
@@ -769,6 +778,7 @@ function addGuestChair(parent, x, z, rotY) {
 function addTubeBundle(parent, x, z) {
   const g = new THREE.Group();
   g.position.set(x, FLOOR_Y, z);
+  g.scale.setScalar(DETAIL_SCALE);
   parent.add(g);
   const heights = [1.55, 1.4, 1.65, 1.3, 1.5];
   heights.forEach((h, i) => {
@@ -782,6 +792,7 @@ function addTubeBundle(parent, x, z) {
 
 function createPerson({ shirt, skin, hair, style = 'short', tie = false }) {
   const g = new THREE.Group();
+  g.scale.setScalar(DETAIL_SCALE);
   const skinMat = new THREE.MeshStandardMaterial({ color: skin, roughness: 0.85 });
   const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.9 });
   const hairMat = new THREE.MeshStandardMaterial({ color: hair, roughness: 0.75 });
@@ -890,8 +901,8 @@ function addStaffTag(parent, member, color, x, z) {
       depthWrite: false,
     })
   );
-  tag.scale.set(2.0, 0.55, 1);
-  tag.position.set(x, 1.95, z);
+  tag.scale.set(2.15, 0.59, 1);
+  tag.position.set(x, 2.0, z);
   tag.renderOrder = 19;
   parent.add(tag);
   return tag;
@@ -999,17 +1010,26 @@ function buildRoom(scene, world, d, extras = []) {
   if (isTop) {
     box(g, WORLD.roomW, WORLD.backH, 0.2, M.wall, posX, WORLD.backH / 2, backZ);
   } else {
+    // vách kính phía hành lang để vẫn nhìn thấy lối đi và người di chuyển
     const segW = (WORLD.roomW - gap) / 2;
-    box(g, segW, WORLD.backH, 0.2, M.wall, posX - (gap / 2 + segW / 2), WORLD.backH / 2, backZ);
-    box(g, segW, WORLD.backH, 0.2, M.wall, posX + (gap / 2 + segW / 2), WORLD.backH / 2, backZ);
-    box(g, gap, WORLD.backH - 2.2, 0.2, M.wall, posX, 2.2 + (WORLD.backH - 2.2) / 2, backZ);
+    box(g, segW, WORLD.backH, 0.06, M.glass, posX - (gap / 2 + segW / 2), WORLD.backH / 2, backZ, { cast: false });
+    box(g, segW, WORLD.backH, 0.06, M.glass, posX + (gap / 2 + segW / 2), WORLD.backH / 2, backZ, { cast: false });
+    box(g, gap, WORLD.backH - 2.2, 0.06, M.glass, posX, 2.2 + (WORLD.backH - 2.2) / 2, backZ, { cast: false });
+    box(g, WORLD.roomW, 0.1, 0.16, M.metal, posX, WORLD.backH + 0.05, backZ, { cast: false });
+    [-4.5, -2.8, 2.8, 4.5].forEach((ox) => {
+      box(g, 0.06, WORLD.backH, 0.1, M.metal, posX + ox, WORLD.backH / 2, backZ, { cast: false });
+    });
     box(g, 0.12, 2.2, 0.26, deptMat, posX - gap / 2, 1.1, backZ);
     box(g, 0.12, 2.2, 0.26, deptMat, posX + gap / 2, 1.1, backZ);
     box(g, gap, 0.03, 0.9, deptMat, posX, 0.135, backZ + 0.62, { cast: false });
   }
 
-  // side walls
-  [-1, 1].forEach((side) => {
+  // side walls — vách chung chỉ dựng một lần bởi phòng bên trái
+  const hasLeftNeighbor = DEPARTMENTS.some(
+    (o) => o.id !== d.id && Math.abs(o.posZ - posZ) < 0.01 && Math.abs(o.posX + WORLD.roomW - posX) < 0.01
+  );
+  const sides = hasLeftNeighbor ? [1] : [-1, 1];
+  sides.forEach((side) => {
     const sx = posX + side * (WORLD.roomW / 2);
     box(g, 0.18, WORLD.wallH, WORLD.roomD, M.wall, sx, WORLD.wallH / 2, posZ);
     box(g, 0.22, 0.1, WORLD.roomD, trimMat, sx, WORLD.wallH + 0.05, posZ);
@@ -1250,7 +1270,11 @@ function addGuideLines(scene) {
   const lineMat = 0x9db0c6;
 
   const entryLine = dashedFloorLine(
-    [new THREE.Vector3(ENTRY.x, 0.055, ENTRY.z), new THREE.Vector3(0, 0.055, 8), hub],
+    [
+      new THREE.Vector3(ENTRY.x, 0.055, ENTRY.z),
+      new THREE.Vector3(ENTRY.x, 0.055, WORLD.corridorZ),
+      hub,
+    ],
     lineMat,
     0.5
   );

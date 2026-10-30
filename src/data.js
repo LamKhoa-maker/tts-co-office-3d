@@ -3,10 +3,10 @@ export const WORLD = {
   roomD: 9.5,
   wallH: 1.5,
   backH: 3.0,
-  corridorZ: -0.25,
+  corridorZ: -2.25,
 };
 
-export const ENTRY = { x: 0, z: 15.2 };
+export const ENTRY = { x: 12, z: 6.5 };
 
 export const FLOW_ORDER = ['tech', 'sales', 'director', 'accounting'];
 
@@ -19,7 +19,7 @@ export const DEPARTMENTS = [
     icon: '👥',
     color: '#0d9488',
     colorHex: 0x14b8a6,
-    posX: -14.5,
+    posX: -12,
     posZ: -9,
     staff: 'Trần Mai Anh',
     role: 'Chuyên viên Nhân sự',
@@ -56,7 +56,7 @@ export const DEPARTMENTS = [
     icon: '📐',
     color: '#2563eb',
     colorHex: 0x3b82f6,
-    posX: 14.5,
+    posX: 12,
     posZ: -9,
     staff: 'Nguyễn Đức Huy',
     role: 'Kỹ sư thiết kế PCCC',
@@ -73,8 +73,8 @@ export const DEPARTMENTS = [
     icon: '💼',
     color: '#d97706',
     colorHex: 0xf59e0b,
-    posX: -14.5,
-    posZ: 8.5,
+    posX: -12,
+    posZ: 4.5,
     staff: 'Lê Thu Hà',
     role: 'Chuyên viên Kinh doanh',
     desc: 'Lập báo giá từ khối lượng BOQ, soạn thảo hợp đồng và làm việc trực tiếp với khách hàng.',
@@ -107,8 +107,8 @@ export const DEPARTMENTS = [
     icon: '📊',
     color: '#7c3aed',
     colorHex: 0x8b5cf6,
-    posX: 14.5,
-    posZ: 8.5,
+    posX: 0,
+    posZ: 4.5,
     staff: 'Vũ Khánh Linh',
     role: 'Kế toán nội bộ',
     labelStaff: 'Kế toán nội bộ · Kế toán thuế',
