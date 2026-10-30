@@ -1,7 +1,8 @@
 import * as THREE from '../vendor/three.module.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
-import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY, LAW_GROUPS } from './data.js';
-import { COMPANY_STAFF, LEGAL_SOURCES, formatViDate, formatViTime, getDailyPlan, loadAIState, saveAIState } from './hr-ai.js';
+import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY, LAW_GROUPS, DEPT_SCREENS, HIRE_LOOKS } from './data.js';
+import { COMPANY_STAFF, LEGAL_SOURCES, formatViDate, formatViTime, getDailyPlan, loadAIState, saveAIState, setCompanyStaff } from './hr-ai.js';
+import { loadRoster, saveRoster, loadTasks, saveTasks, makeId } from './staff-store.js';
 import { buildWorld, FLOOR_Y } from './world.js';
 
 // ------------------------------------------------------------ renderer
@@ -18,7 +19,14 @@ renderer.toneMappingExposure = 1.06;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 300);
 
-const world = buildWorld(scene);
+const roster = loadRoster();
+for (const d of DEPARTMENTS) {
+  if (!Array.isArray(roster.extras[d.id])) roster.extras[d.id] = [];
+  roster.extras[d.id] = roster.extras[d.id].slice(0, 2);
+}
+const taskState = loadTasks();
+
+const world = buildWorld(scene, roster.extras);
 
 // ------------------------------------------------------------ controls
 
@@ -76,6 +84,8 @@ const state = {
   speed: 1,
   hovered: null,
   selected: null,
+  selectedStaff: null,
+  viewLocked: false,
   tokenMode: 'idle',
   lastDept: null,
   bubbleDept: null,
@@ -86,6 +96,7 @@ const state = {
 
 // ------------------------------------------------------------ HR AI
 
+setCompanyStaff(staffTotal());
 let aiPlan = getDailyPlan();
 let aiState = loadAIState(aiPlan.key);
 
@@ -242,9 +253,11 @@ const ui = {
   statusText: document.getElementById('statusText'),
   run: document.getElementById('btnRun'),
   speed: document.getElementById('btnSpeed'),
+  lock: document.getElementById('btnLock'),
   rotate: document.getElementById('btnRotate'),
   reset: document.getElementById('btnReset'),
   card: document.getElementById('deptCard'),
+  staffCount: document.getElementById('staffCount'),
   logList: document.getElementById('logList'),
   logCount: document.getElementById('logCount'),
   flowSteps: document.getElementById('flowSteps'),
@@ -342,16 +355,41 @@ function setStepState(id, s) {
 
 // ------------------------------------------------------------ dept card
 
-function membersOf(d) {
-  return d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
 }
 
-function staffListHTML(d) {
-  return `<div class="staff-list">${membersOf(d).map((m) => `
-    <div class="staff">
-      <div class="staff-row"><strong>${m.name}</strong><span>${m.role}</span></div>
-      ${m.scope ? `<em class="staff-scope">${m.scope}</em>` : ''}
-    </div>`).join('')}</div>`;
+function membersOf(d) {
+  const base = d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
+  const ids = new Set(base.map((m) => m.id));
+  const extras = (roster.extras[d.id] || []).filter((m) => m && !ids.has(m.id));
+  return [...base, ...extras].slice(0, 3);
+}
+
+function staffTotal() {
+  return DEPARTMENTS.reduce((n, d) => n + membersOf(d).length, 0);
+}
+
+function updateStaffCount() {
+  const n = staffTotal();
+  setCompanyStaff(n);
+  if (ui.staffCount) ui.staffCount.textContent = n;
+}
+
+function staffListHTML(d, activeId = null) {
+  const members = membersOf(d);
+  const rows = members.map((m) => `
+    <button type="button" class="staff staff-btn${m.id === activeId ? ' is-open' : ''}" data-staff-id="${m.id}">
+      <span class="staff-row"><strong>${esc(m.name)}</strong><span>${esc(m.role)}</span></span>
+      ${m.scope ? `<em class="staff-scope">${esc(m.scope)}</em>` : ''}
+      <span class="staff-more">Xem nhiệm vụ ›</span>
+    </button>`).join('');
+  const hire = members.length < 3
+    ? `<button type="button" class="hire-btn" data-hire="${d.id}">＋ Tuyển thêm nhân sự</button>`
+    : `<p class="staff-full">Phòng đã đủ 3 nhân sự</p>`;
+  return `<div class="staff-list">${rows}${hire}</div>`;
 }
 
 function lawBlockHTML(key) {
@@ -402,7 +440,6 @@ function renderCard(d) {
       <div><strong id="statIn">${state.stats[d.id].in}</strong><span>Hồ sơ nhận</span></div>
       <div><strong id="statOut">${state.stats[d.id].out}</strong><span>Hoàn tất</span></div>
     </div>`;
-  ui.card.querySelector('.close').addEventListener('click', deselect);
   if (d.id === 'director') appendDirectorInbox();
 }
 
@@ -456,12 +493,193 @@ function renderHRCard(d) {
       </details>
       <p class="ai-note">Nội dung mô phỏng phục vụ trình diễn, cần đối chiếu văn bản pháp luật hiện hành trước khi áp dụng.</p>
     </div>`;
+}
 
-  ui.card.querySelector('.close').addEventListener('click', deselect);
-  for (const btn of ui.card.querySelectorAll('.ai-check')) {
-    btn.addEventListener('click', () => toggleAITask(btn.closest('.ai-task')));
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/);
+  const take = parts.slice(-2).map((p) => p[0] || '');
+  return (take.join('') || '?').toUpperCase();
+}
+
+function staffTasks(staffId) {
+  if (!Array.isArray(taskState[staffId])) taskState[staffId] = [];
+  return taskState[staffId];
+}
+
+function taskHTML(staffId, t) {
+  return `<li class="task${t.done ? ' is-done' : ''}" data-task-id="${t.id}">
+    <button class="task-check" type="button" data-staff="${staffId}" data-task-id="${t.id}" aria-pressed="${t.done}" aria-label="Đánh dấu hoàn thành">${t.done ? '✓' : ''}</button>
+    <span class="task-text">${esc(t.text)}</span>
+    <button class="task-del" type="button" data-staff="${staffId}" data-task-id="${t.id}" aria-label="Xoá việc">×</button>
+  </li>`;
+}
+
+function renderStaffCard(d, m) {
+  const tasks = staffTasks(m.id);
+  const openCount = tasks.filter((t) => !t.done).length;
+  const hasLaw = Boolean(m.lawGroup && LAW_GROUPS[m.lawGroup]);
+
+  ui.card.classList.remove('is-ai');
+  ui.card.innerHTML = `
+    <button class="close" type="button" aria-label="Đóng">×</button>
+    <button class="staff-back" type="button" data-back="${d.id}">‹ ${esc(d.short)}</button>
+    <div class="card-head">
+      <div class="avatar" style="background:${d.color}">${esc(initials(m.name))}</div>
+      <div>
+        <span class="tag" style="color:${d.color}">${esc(m.role)}</span>
+        <h2>${esc(m.name)}</h2>
+      </div>
+    </div>
+    <p class="staff-room">${d.icon} ${esc(d.name)}</p>
+    ${m.scope ? `<div class="duties"><span>${esc(m.scope)}</span></div>` : ''}
+    ${hasLaw ? `<div class="law-stack">${lawBlockHTML(m.lawGroup)}</div>` : `<p class="desc">${esc(d.desc)}</p>`}
+    <div class="task-panel">
+      <div class="task-head">
+        <h3>Việc được giao</h3>
+        <span class="task-count">${tasks.length ? `${openCount}/${tasks.length} chưa xong` : 'Chưa có việc'}</span>
+      </div>
+      ${tasks.length
+        ? `<ul class="task-list">${tasks.map((t) => taskHTML(m.id, t)).join('')}</ul>`
+        : '<p class="task-empty">Chưa giao việc nào cho nhân sự này.</p>'}
+      <form class="task-form" data-staff="${m.id}">
+        <input name="task" type="text" maxlength="90" placeholder="Giao việc mới..." autocomplete="off" required>
+        <button type="submit">Giao</button>
+      </form>
+    </div>`;
+}
+
+function renderRecruitCard(d) {
+  const count = membersOf(d).length;
+  ui.card.classList.remove('is-ai');
+  ui.card.innerHTML = `
+    <button class="close" type="button" aria-label="Đóng">×</button>
+    <button class="staff-back" type="button" data-back="${d.id}">‹ ${esc(d.short)}</button>
+    <div class="card-head">
+      <div class="avatar" style="background:${d.color}">＋</div>
+      <div>
+        <span class="tag" style="color:${d.color}">Tuyển dụng</span>
+        <h2>Thêm nhân sự · ${esc(d.short)}</h2>
+      </div>
+    </div>
+    <p class="desc">Phòng đang có ${count}/3 nhân sự. Nhân sự mới được kê thêm bàn làm việc riêng trong mô hình 3D và được lưu lại cho lần truy cập sau.</p>
+    <form class="recruit-form" data-dept="${d.id}">
+      <label>Họ tên<input name="name" type="text" maxlength="40" placeholder="VD: Nguyễn Văn An" autocomplete="off" required></label>
+      <label>Chức danh<input name="role" type="text" maxlength="40" placeholder="VD: Chuyên viên hồ sơ" autocomplete="off" required></label>
+      <label>Phụ trách<input name="scope" type="text" maxlength="60" placeholder="VD: Hồ sơ dự án & lưu trữ" autocomplete="off"></label>
+      <button type="submit" class="btn primary">Tuyển vào phòng</button>
+    </form>`;
+}
+
+function selectStaff(d, staffId) {
+  const m = membersOf(d).find((x) => x.id === staffId);
+  if (!m) return;
+  state.selected = d.id;
+  state.selectedStaff = m.id;
+  hideToast();
+  renderStaffCard(d, m);
+  ui.card.classList.remove('hidden');
+}
+
+function selectRecruit(deptId) {
+  const d = DEPT_MAP[deptId];
+  if (!d) return;
+  if (membersOf(d).length >= 3) {
+    showToast('Mỗi phòng tối đa 3 nhân sự', 2600);
+    return;
   }
-  ui.card.querySelector('.ai-send').addEventListener('click', sendHRProposal);
+  state.selected = d.id;
+  state.selectedStaff = null;
+  hideToast();
+  renderRecruitCard(d);
+  ui.card.classList.remove('hidden');
+}
+
+function hireStaff(form) {
+  const d = DEPT_MAP[form.dataset.dept];
+  if (!d) return;
+  if (membersOf(d).length >= 3) {
+    showToast('Mỗi phòng tối đa 3 nhân sự', 2600);
+    return;
+  }
+  const data = new FormData(form);
+  const name = String(data.get('name') || '').trim().slice(0, 40);
+  const role = String(data.get('role') || '').trim().slice(0, 40);
+  const scope = String(data.get('scope') || '').trim().slice(0, 60);
+  if (!name || !role) return;
+
+  const slot = membersOf(d).length - 1;
+  const member = {
+    id: makeId(d.id),
+    name,
+    role,
+    scope,
+    hired: true,
+    screen: DEPT_SCREENS[d.id],
+    look: HIRE_LOOKS[slot % HIRE_LOOKS.length],
+  };
+
+  roster.extras[d.id].push(member);
+  if (!world.addStaffMember(d, member)) {
+    roster.extras[d.id].pop();
+    showToast('Phòng đã đủ nhân sự', 2600);
+    return;
+  }
+  saveRoster(roster);
+  updateStaffCount();
+  addLog(d.id, `Tuyển mới ${name} — ${role}`);
+  showToast(`${name} đã vào ${d.short} · Đã kê thêm bàn làm việc`, 4200);
+  selectStaff(d, member.id);
+}
+
+function rerenderStaff(staffId) {
+  const d = DEPT_MAP[state.selected];
+  if (!d) return;
+  const m = membersOf(d).find((x) => x.id === staffId);
+  if (m) renderStaffCard(d, m);
+}
+
+function addStaffTask(staffId, text) {
+  const clean = String(text || '').trim().slice(0, 90);
+  if (!clean) return;
+  staffTasks(staffId).unshift({ id: makeId('t'), text: clean, done: false, at: Date.now() });
+  saveTasks(taskState);
+  rerenderStaff(staffId);
+  const d = DEPT_MAP[state.selected];
+  const m = d ? membersOf(d).find((x) => x.id === staffId) : null;
+  addLog(d ? d.id : null, `Giao việc cho ${m ? m.name : 'nhân sự'}: ${clean}`);
+  showToast(`Đã giao việc cho ${m ? m.name : 'nhân sự'}`, 2600);
+  const input = ui.card.querySelector('.task-form input');
+  if (input) input.focus();
+}
+
+function toggleStaffTask(staffId, taskId) {
+  const tasks = staffTasks(staffId);
+  const t = tasks.find((x) => x.id === taskId);
+  if (!t) return;
+  t.done = !t.done;
+  saveTasks(taskState);
+
+  const li = ui.card.querySelector(`.task[data-task-id="${taskId}"]`);
+  if (li) {
+    li.classList.toggle('is-done', t.done);
+    const btn = li.querySelector('.task-check');
+    btn.setAttribute('aria-pressed', String(t.done));
+    btn.textContent = t.done ? '✓' : '';
+  }
+  const count = ui.card.querySelector('.task-count');
+  if (count) {
+    const open = tasks.filter((x) => !x.done).length;
+    count.textContent = `${open}/${tasks.length} chưa xong`;
+  }
+}
+
+function removeStaffTask(staffId, taskId) {
+  const tasks = staffTasks(staffId);
+  const i = tasks.findIndex((x) => x.id === taskId);
+  if (i < 0) return;
+  tasks.splice(i, 1);
+  saveTasks(taskState);
+  rerenderStaff(staffId);
 }
 
 function toggleAITask(li) {
@@ -528,6 +746,7 @@ function updateStatsUI(id) {
 }
 
 function focusDeptCamera(d) {
+  if (state.viewLocked) return;
   const target = new THREE.Vector3(d.posX, 0.9, d.posZ + 0.3);
   const dist = THREE.MathUtils.clamp(defaultDistance() * 0.44, 19, 64);
   focusCamera(target.clone().addScaledVector(viewDir(), dist), target);
@@ -535,6 +754,7 @@ function focusDeptCamera(d) {
 
 function selectDept(id, focus = true) {
   state.selected = id;
+  state.selectedStaff = null;
   hideToast();
   const d = DEPT_MAP[id];
   renderCard(d);
@@ -552,7 +772,26 @@ function selectDept(id, focus = true) {
 
 function deselect() {
   state.selected = null;
+  state.selectedStaff = null;
   ui.card.classList.add('hidden');
+}
+
+function setViewLocked(on) {
+  state.viewLocked = on;
+  controls.enabled = !on;
+  ui.lock.classList.toggle('active', on);
+  ui.lock.setAttribute('aria-pressed', String(on));
+  ui.lock.title = on ? 'Mở khoá góc nhìn' : 'Khoá góc nhìn ban đầu';
+  ui.rotate.disabled = on;
+  if (on) {
+    controls.autoRotate = false;
+    ui.rotate.classList.remove('active');
+    deselect();
+    focusCamera(defaultPos(), DEFAULT_TARGET);
+    showToast('Đã khoá góc nhìn ban đầu · Bấm lại để mở khoá', 3000);
+  } else {
+    showToast('Đã mở khoá góc nhìn · Kéo chuột để xoay tự do', 2400);
+  }
 }
 
 // ------------------------------------------------------------ bubble
@@ -850,18 +1089,29 @@ async function runFlow() {
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
-function pickDept(clientX, clientY) {
+function castAt(clientX, clientY) {
   pointer.set(
     (clientX / window.innerWidth) * 2 - 1,
     -(clientY / window.innerHeight) * 2 + 1
   );
   raycaster.setFromCamera(pointer, camera);
+}
+
+function pickDept(clientX, clientY) {
+  castAt(clientX, clientY);
   const hit = raycaster.intersectObjects(world.pickables, false)[0];
   return hit ? hit.object.userData.deptId : null;
 }
 
+function pickStaff(clientX, clientY) {
+  castAt(clientX, clientY);
+  const hit = raycaster.intersectObjects(world.staffPickables, false)[0];
+  return hit ? { deptId: hit.object.userData.deptId, staffId: hit.object.userData.staffId } : null;
+}
+
 canvas.addEventListener('pointermove', (e) => {
-  state.hovered = pickDept(e.clientX, e.clientY);
+  const staff = pickStaff(e.clientX, e.clientY);
+  state.hovered = staff ? staff.deptId : pickDept(e.clientX, e.clientY);
   canvas.classList.toggle('pointing', Boolean(state.hovered));
 });
 
@@ -879,6 +1129,11 @@ canvas.addEventListener('pointerup', (e) => {
   const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
   pointerDown = null;
   if (moved > 6) return;
+  const staff = pickStaff(e.clientX, e.clientY);
+  if (staff) {
+    selectStaff(DEPT_MAP[staff.deptId], staff.staffId);
+    return;
+  }
   const id = pickDept(e.clientX, e.clientY);
   if (id) selectDept(id);
   else deselect();
@@ -888,6 +1143,50 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') deselect();
 });
 
+ui.card.addEventListener('click', (e) => {
+  const close = e.target.closest('.close');
+  if (close) { deselect(); return; }
+
+  const staffBtn = e.target.closest('.staff-btn');
+  if (staffBtn) {
+    const d = DEPT_MAP[state.selected];
+    if (d) selectStaff(d, staffBtn.dataset.staffId);
+    return;
+  }
+
+  const hireBtn = e.target.closest('.hire-btn');
+  if (hireBtn) { selectRecruit(hireBtn.dataset.hire); return; }
+
+  const backBtn = e.target.closest('.staff-back');
+  if (backBtn) { selectDept(backBtn.dataset.back); return; }
+
+  const check = e.target.closest('.task-check');
+  if (check) { toggleStaffTask(check.dataset.staff, check.dataset.taskId); return; }
+
+  const del = e.target.closest('.task-del');
+  if (del) { removeStaffTask(del.dataset.staff, del.dataset.taskId); return; }
+
+  const aiCheck = e.target.closest('.ai-check');
+  if (aiCheck) { toggleAITask(aiCheck.closest('.ai-task')); return; }
+
+  if (e.target.closest('.ai-send')) sendHRProposal();
+});
+
+ui.card.addEventListener('submit', (e) => {
+  const taskForm = e.target.closest('.task-form');
+  if (taskForm) {
+    e.preventDefault();
+    const input = taskForm.querySelector('input');
+    if (input) addStaffTask(taskForm.dataset.staff, input.value);
+    return;
+  }
+  const recruitForm = e.target.closest('.recruit-form');
+  if (recruitForm) {
+    e.preventDefault();
+    hireStaff(recruitForm);
+  }
+});
+
 ui.run.addEventListener('click', runFlow);
 
 ui.speed.addEventListener('click', () => {
@@ -895,7 +1194,10 @@ ui.speed.addEventListener('click', () => {
   ui.speed.textContent = `${state.speed}×`;
 });
 
+ui.lock.addEventListener('click', () => setViewLocked(!state.viewLocked));
+
 ui.rotate.addEventListener('click', () => {
+  if (state.viewLocked) return;
   controls.autoRotate = !controls.autoRotate;
   ui.rotate.classList.toggle('active', controls.autoRotate);
   if (controls.autoRotate) camGoalActive = false;
@@ -943,13 +1245,14 @@ function animateRooms(t, dt) {
 
 function start() {
   buildChips();
+  updateStaffCount();
 
   addLog(null, 'Mô hình văn phòng TTS.Co đã sẵn sàng');
   addLog('hr', 'AI Nhân sự đã chuẩn bị 2 đề xuất cho hôm nay');
   setStatus('Sẵn sàng', 'idle');
 
   setTimeout(() => {
-    showToast('Bấm phòng Nhân sự để xem 2 đề xuất AI hôm nay · Bấm “Chạy quy trình” để mô phỏng dòng hồ sơ', 5600);
+    showToast('Bấm một phòng rồi bấm từng nhân sự để xem nhiệm vụ · “Chạy quy trình” để mô phỏng dòng hồ sơ', 5600);
   }, 900);
 
   renderer.setAnimationLoop(() => {

@@ -1,6 +1,10 @@
 import { DEPARTMENTS } from './data.js';
 
-export const COMPANY_STAFF = DEPARTMENTS.reduce((n, d) => n + (d.staffList?.length || 1), 0);
+export let COMPANY_STAFF = DEPARTMENTS.reduce((n, d) => n + (d.staffList?.length || 1), 0);
+
+export function setCompanyStaff(n) {
+  COMPANY_STAFF = Math.max(0, Number(n) || 0);
+}
 
 export const LEGAL_SOURCES = [
   { code: 'BLLĐ 2019', name: 'Bộ luật Lao động 2019 (45/2019/QH14)', note: 'Quyền và nghĩa vụ của người sử dụng lao động' },

@@ -195,6 +195,9 @@ html, body {
   color: #fff;
   border-color: #0f172a;
 }
+.btn svg { width: 16px; height: 16px; display: block; }
+.btn:disabled { opacity: 0.38; cursor: default; }
+.btn:disabled:hover { background: var(--glass-strong); transform: none; }
 
 /* ------------------------------------------------------------ panels */
 
@@ -494,6 +497,203 @@ html, body {
 }
 .stats strong { font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .stats span { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+
+/* ------------------------------------------------------------ staff actions */
+
+.staff-btn {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.staff-btn:hover { background: rgba(15, 23, 42, 0.06); border-color: rgba(15, 23, 42, 0.1); }
+.staff-btn:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.staff-btn .staff-row strong { font-size: 13.5px; color: var(--ink); }
+.staff-btn .staff-row span { font-size: 11.5px; color: var(--muted); }
+.staff-btn.is-open { background: #fff; border-color: rgba(15, 23, 42, 0.18); }
+.staff-more { margin-top: 6px; font-size: 10px; font-weight: 700; color: var(--blue); }
+
+.hire-btn {
+  appearance: none;
+  border: 1px dashed rgba(15, 23, 42, 0.22);
+  background: rgba(255, 255, 255, 0.55);
+  color: #334155;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 9px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.hire-btn:hover { background: #fff; border-color: rgba(37, 99, 235, 0.45); color: var(--blue); }
+.staff-full { margin: 2px 0 0; font-size: 10px; color: #94a3b8; text-align: center; }
+
+#deptCard .staff-back {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin-bottom: 10px;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+}
+#deptCard .staff-back:hover { color: var(--ink); }
+
+.staff-room {
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+/* ------------------------------------------------------------ staff tasks */
+
+.task-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+}
+.task-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.task-head h3 {
+  margin: 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.task-count { font-size: 10px; color: #94a3b8; white-space: nowrap; }
+.task-list {
+  list-style: none;
+  margin: 9px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+}
+.task.is-done { opacity: 0.62; }
+.task.is-done .task-text { text-decoration: line-through; color: #94a3b8; }
+.task-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 6px;
+  border: 1.5px solid #9db9b5;
+  background: #fff;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.task.is-done .task-check { background: #0d9488; border-color: #0d9488; }
+.task-text {
+  flex: 1;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #334155;
+  word-break: break-word;
+}
+.task-del {
+  flex: none;
+  border: none;
+  background: none;
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.task-del:hover { color: var(--red); }
+.task-empty { margin: 8px 0 0; font-size: 10.5px; color: #94a3b8; }
+.task-form { display: flex; gap: 6px; margin-top: 10px; }
+.task-form input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: var(--ink);
+}
+.task-form input:focus { outline: 2px solid rgba(37, 99, 235, 0.35); outline-offset: 1px; }
+.task-form button {
+  flex: none;
+  border: none;
+  border-radius: 9px;
+  padding: 0 12px;
+  height: 34px;
+  background: var(--ink);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.task-form button:hover { background: #1e293b; }
+
+/* ------------------------------------------------------------ recruit form */
+
+.recruit-form {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.recruit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.recruit-form input {
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  background: #fff;
+  color: var(--ink);
+}
+.recruit-form input:focus { outline: 2px solid rgba(37, 99, 235, 0.3); outline-offset: 1px; }
+.recruit-form .btn { height: 40px; justify-content: center; }
 
 /* ------------------------------------------------------------ HR AI */
 
@@ -940,6 +1140,8 @@ html, body {
   }
   #deptCard.is-ai { width: auto; max-height: 52vh; }
   #deptCard .desc { font-size: 12px; }
+  .task-form input,
+  .recruit-form input { font-size: 16px; }
   .hint { display: none; }
   .toast { bottom: calc(88px + env(safe-area-inset-bottom)); font-size: 11.5px; padding: 9px 14px; }
   .bubble { max-width: 230px; }

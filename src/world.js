@@ -1,9 +1,10 @@
 import * as THREE from '../vendor/three.module.js';
-import { DEPARTMENTS, WORLD, ENTRY } from './data.js';
+import { DEPARTMENTS, WORLD, ENTRY, DEPT_SCREENS, HIRE_LOOKS } from './data.js';
 
 export const FLOOR_Y = 0.1;
 
 const SEAT_DROP = -0.09;
+const MAX_STAFF = 3;
 
 const WHITE = new THREE.Color(0xffffff);
 
@@ -101,10 +102,10 @@ function staffTagTexture(name, role, color) {
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#f8fafc';
     ctx.font = '600 33px "Segoe UI", "Helvetica Neue", sans-serif';
-    ctx.fillText(name, 76, h / 2 - 17);
+    ctx.fillText(name, 76, h / 2 - 17, w - 96);
     ctx.fillStyle = 'rgba(203,213,225,0.85)';
     ctx.font = '500 24px "Segoe UI", "Helvetica Neue", sans-serif';
-    ctx.fillText(role, 76, h / 2 + 21);
+    ctx.fillText(role, 76, h / 2 + 21, w - 96);
   });
 }
 
@@ -881,11 +882,100 @@ function createPerson({ shirt, skin, hair, style = 'short', tie = false }) {
 
 // ---------------------------------------------------------------- rooms
 
-function buildRoom(scene, world, d) {
+function addStaffTag(parent, member, color, x, z) {
+  const tag = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: staffTagTexture(member.name, member.role, color),
+      transparent: true,
+      depthWrite: false,
+    })
+  );
+  tag.scale.set(2.0, 0.55, 1);
+  tag.position.set(x, 1.95, z);
+  tag.renderOrder = 19;
+  parent.add(tag);
+  return tag;
+}
+
+function addStaffPick(world, person, member, d) {
+  const pick = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.62, 0.62, 2.0, 8),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, colorWrite: false })
+  );
+  pick.position.y = 1.0;
+  pick.userData.staffId = member.id;
+  pick.userData.deptId = d.id;
+  person.group.add(pick);
+  world.staffPickables.push(pick);
+}
+
+function addExtraWorkstation(world, d, room, member, slot) {
+  const g = room.group;
+  const base = d.extraSide || 1;
+  const side = slot % 2 === 0 ? base : -base;
+  const front = slot % 2 === 1;
+  const x = d.posX + side * 4.55;
+  const deskZ = d.posZ + (front ? 1.55 : -1.5);
+  const seatZ = d.posZ + (front ? 0.55 : -2.5);
+
+  const desk = addDesk(g, x, deskZ, 2.4, 1.35);
+  box(desk, 0.7, 0.03, 0.22, M.keyboard, 0, 0.795, 0.33, { cast: false });
+  const mouse = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), M.keyboard);
+  mouse.scale.set(0.8, 0.5, 1.2);
+  mouse.position.set(0.52, 0.805, 0.33);
+  desk.add(mouse);
+  room.screens.push(addMonitor(desk, 0, -0.28, {
+    kind: member.screen || DEPT_SCREENS[d.id] || 'dash',
+    color: d.color,
+  }));
+  addPaperStack(desk, side > 0 ? -0.58 : 0.62, 0.26, 2, 0.1);
+  addChair(g, x, seatZ, 0, false);
+
+  const look = member.look || HIRE_LOOKS[slot % HIRE_LOOKS.length];
+  const person = createPerson({
+    shirt: d.colorHex,
+    skin: look.skin,
+    hair: look.hair,
+    style: look.style,
+    tie: Boolean(look.tie),
+  });
+  person.group.position.set(x, FLOOR_Y + SEAT_DROP, seatZ);
+  g.add(person.group);
+
+  world.people[member.id] = {
+    ...person,
+    active: false,
+    baseY: FLOOR_Y,
+    home: new THREE.Vector3(x, FLOOR_Y, seatZ),
+    walk: null,
+    standing: false,
+    lookYaw: null,
+    yOff: SEAT_DROP,
+  };
+
+  addStaffPick(world, person, member, d);
+  room.tags.push(addStaffTag(g, member, d.color, x, seatZ));
+}
+
+function buildRoom(scene, world, d, extras = []) {
   const g = new THREE.Group();
   scene.add(g);
 
   const { posX, posZ } = d;
+  const baseMembers = d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
+  const room = {
+    group: g,
+    ring: null,
+    sprite: null,
+    screens: [],
+    active: false,
+    dept: d,
+    members: [],
+    extraMembers: [],
+    tags: [],
+    mainTag: null,
+  };
+  world.rooms[d.id] = room;
   const isTop = posZ < 0;
   const backZ = posZ - WORLD.roomD / 2;
   const frontZ = posZ + WORLD.roomD / 2;
@@ -967,6 +1057,7 @@ function buildRoom(scene, world, d) {
   });
   person.group.position.set(personX, FLOOR_Y + SEAT_DROP, personZ);
   g.add(person.group);
+  addStaffPick(world, person, baseMembers[0], d);
 
   // keyboard + mouse
   box(desk, 0.86, 0.03, 0.24, M.keyboard, 0, 0.795, 0.36, { cast: false });
@@ -975,7 +1066,7 @@ function buildRoom(scene, world, d) {
   mouse.position.set(0.58, 0.805, 0.36);
   desk.add(mouse);
 
-  const screens = [];
+  const screens = room.screens;
   const colorCss = d.color;
 
   // per-department props
@@ -1051,58 +1142,15 @@ function buildRoom(scene, world, d) {
     addPlant(g, posX - 4.7, posZ + 3.4, 0.95);
   }
 
-  // second workstation for two-person rooms (Nhân sự, Kế toán)
-  const members = d.staffList || [];
+  // extra workstations for roster members (up to 3 staff per room)
+  const baseIds = new Set(baseMembers.map((m) => m.id));
+  const extraMembers = extras.filter((m) => m && !baseIds.has(m.id));
+  const members = [...baseMembers, ...extraMembers].slice(0, MAX_STAFF);
+  room.members = members;
+  room.extraMembers = members.slice(1);
   if (members.length > 1) {
-    const side = d.extraSide || 1;
-    const extraX = posX + side * 3.55;
-    const extraZ = posZ - 2.45;
-    const desk2 = addDesk(g, extraX, posZ - 1.5, 2.4, 1.35);
-    box(desk2, 0.7, 0.03, 0.22, M.keyboard, 0, 0.795, 0.33, { cast: false });
-    const mouse2 = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), M.keyboard);
-    mouse2.scale.set(0.8, 0.5, 1.2);
-    mouse2.position.set(0.52, 0.805, 0.33);
-    desk2.add(mouse2);
-    screens.push(addMonitor(desk2, 0, -0.28, { kind: d.id === 'hr' ? 'legal' : 'tax', color: colorCss }));
-    if (d.id === 'hr') addPaperStack(desk2, 0.62, 0.26, 2, 0.12);
-    else addPaperStack(desk2, -0.58, 0.26, 3, 0.1);
-
-    addChair(g, extraX, extraZ, 0, false);
-    const look = members[1].look || {};
-    const person2 = createPerson({
-      shirt: d.colorHex,
-      skin: look.skin || '#e6b489',
-      hair: look.hair || '#1f2937',
-      style: look.style || 'short',
-      tie: Boolean(look.tie),
-    });
-    person2.group.position.set(extraX, FLOOR_Y + SEAT_DROP, extraZ);
-    g.add(person2.group);
-
-    world.people[members[1].id] = {
-      ...person2,
-      active: false,
-      baseY: FLOOR_Y,
-      home: new THREE.Vector3(extraX, FLOOR_Y, extraZ),
-      walk: null,
-      standing: false,
-      lookYaw: null,
-      yOff: SEAT_DROP,
-    };
-
-    members.forEach((m, i) => {
-      const tag = new THREE.Sprite(
-        new THREE.SpriteMaterial({
-          map: staffTagTexture(m.name, m.role, colorCss),
-          transparent: true,
-          depthWrite: false,
-        })
-      );
-      tag.scale.set(2.0, 0.55, 1);
-      tag.position.set(i === 0 ? posX : extraX, 1.95, posZ - 2.5);
-      tag.renderOrder = 19;
-      g.add(tag);
-    });
+    room.extraMembers.forEach((m, slot) => addExtraWorkstation(world, d, room, m, slot));
+    room.mainTag = addStaffTag(g, members[0], d.color, posX, posZ - 2.5);
   }
 
   // room label
@@ -1140,15 +1188,10 @@ function buildRoom(scene, world, d) {
   g.add(pick);
   world.pickables.push(pick);
 
-  world.rooms[d.id] = {
-    group: g,
-    ring,
-    sprite,
-    screens,
-    active: false,
-    dept: d,
-  };
-  world.people[d.id] = {
+  room.ring = ring;
+  room.sprite = sprite;
+
+  world.people[baseMembers[0].id] = {
     ...person,
     active: false,
     baseY: FLOOR_Y,
@@ -1360,12 +1403,13 @@ function updateWalk(p, dt) {
 
 // ---------------------------------------------------------------- build
 
-export function buildWorld(scene) {
+export function buildWorld(scene, extras = {}) {
   initMaterials();
   const world = {
     rooms: {},
     people: {},
     pickables: [],
+    staffPickables: [],
     plants: [],
     token: null,
     aiHolo: null,
@@ -1375,10 +1419,23 @@ export function buildWorld(scene) {
   addLights(scene);
   plantSink = world.plants;
   addEntrance(scene, world);
-  for (const d of DEPARTMENTS) buildRoom(scene, world, d);
+  for (const d of DEPARTMENTS) buildRoom(scene, world, d, extras[d.id] || []);
   plantSink = null;
   addGuideLines(scene);
   addToken(scene, world);
+
+  world.addStaffMember = (d, member) => {
+    const room = world.rooms[d.id];
+    if (!room || room.extraMembers.length >= MAX_STAFF - 1) return false;
+    const slot = room.extraMembers.length;
+    if (slot === 0) {
+      room.mainTag = addStaffTag(room.group, room.members[0], d.color, d.posX, d.posZ - 2.5);
+    }
+    addExtraWorkstation(world, d, room, member, slot);
+    room.extraMembers.push(member);
+    room.members.push(member);
+    return true;
+  };
 
   world.walkPerson = (id, points, opts = {}) => {
     const p = world.people[id];

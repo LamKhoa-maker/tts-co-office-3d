@@ -39,6 +39,7 @@ export const DEPARTMENTS = [
         role: 'Nhân viên Pháp chế',
         scope: 'Luật doanh nghiệp',
         lawGroup: 'doanhNghiep',
+        screen: 'legal',
         look: { skin: '#f0c39b', hair: '#2f2a26', style: 'short' },
       },
     ],
@@ -126,6 +127,7 @@ export const DEPARTMENTS = [
         role: 'Kế toán thuế',
         scope: 'Kế toán & thuế',
         lawGroup: 'keToanThue',
+        screen: 'tax',
         look: { skin: '#d9a06b', hair: '#3b2a21', style: 'side', tie: true },
       },
     ],
@@ -137,6 +139,21 @@ export const DEPARTMENTS = [
 ];
 
 export const DEPT_MAP = Object.fromEntries(DEPARTMENTS.map((d) => [d.id, d]));
+
+export const DEPT_SCREENS = {
+  hr: 'org',
+  tech: 'cad',
+  sales: 'chart',
+  director: 'dash',
+  accounting: 'ledger',
+};
+
+export const HIRE_LOOKS = [
+  { skin: '#e6b489', hair: '#1f2937', style: 'short' },
+  { skin: '#f0c39b', hair: '#3b2a21', style: 'long' },
+  { skin: '#d9a06b', hair: '#2f2a26', style: 'side' },
+  { skin: '#f2c9a0', hair: '#4a3728', style: 'bun' },
+];
 
 export const LAW_GROUPS = {
   doanhNghiep: {
