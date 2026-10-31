@@ -877,8 +877,8 @@ async function sendSecretaryMessage(form) {
     showToast('Thư ký không còn trong phòng Giám đốc', 3000);
     return;
   }
-  if (world.hasWalkers()) {
-    showToast('Đang có nhân sự di chuyển — thử lại sau giây lát', 3000);
+  if (world.people[SECRETARY_ID]?.walk) {
+    showToast('Thư ký đang đi — thử lại sau giây lát', 3000);
     return;
   }
 
@@ -1142,10 +1142,6 @@ function dismissStaff(staffId) {
     showToast('Đang chạy quy trình — dừng lại trước khi cho thôi việc', 3200);
     return;
   }
-  if (world.hasWalkers()) {
-    showToast('Nhân sự đang di chuyển — thử lại sau giây lát', 3200);
-    return;
-  }
   const baseSecondary = (d.staffList || []).slice(1).some((x) => x.id === staffId);
   const isExtra = (roster.extras[d.id] || []).some((x) => x.id === staffId);
   if (!baseSecondary && !isExtra) return;
@@ -1306,11 +1302,49 @@ function sendDirectorReport({ auto = false, late = 0 } = {}) {
     reportId: report.id,
   });
   addLog('hr', `${auto ? '09:00 · ' : ''}AI Nhân sự gửi báo cáo ${report.total} việc tới Giám đốc`);
+  void walkProposalToDirector(report);
 
   if (state.selected === 'director' && !state.selectedStaff) renderCard(DEPT_MAP.director);
   if (state.selected === 'hr' && !state.selectedStaff) refreshReportSchedule();
 
   return report;
+}
+
+let proposalCarrierBusy = false;
+
+async function walkProposalToDirector(report) {
+  if (proposalCarrierBusy || state.running) return;
+  const from = DEPT_MAP.hr;
+  const to = DEPT_MAP.director;
+  const carrier = from.staffList?.[0];
+  if (!carrier || !world.people[carrier.id] || world.people[carrier.id].walk) return;
+
+  proposalCarrierBusy = true;
+  const flowAtStart = state.runId;
+  const there = deliveryRoute(from, to);
+  there.push(floorPoint(to.posX, innerDoorZ(to)));
+  const back = there.slice().reverse();
+  try {
+    setStatus('Nhân sự mang đề xuất sang phòng Giám đốc...', 'running');
+    const arrived = await world.walkPerson(carrier.id, there, {
+      speed: walkSpeed(), end: 'stand',
+    });
+    if (!arrived) {
+      if (!world.people[carrier.id]?.walk) world.parkPerson(carrier.id);
+      return;
+    }
+    addLog('director', `Nhân sự trình ${report.tasks.length} đề xuất lên Giám đốc`);
+    if (!state.running && state.runId === flowAtStart) {
+      showToast(`Nhân sự đã mang ${report.tasks.length} đề xuất tới phòng Giám đốc`, 2600);
+    }
+    renderBoard();
+    await new Promise((r) => setTimeout(r, 650 / state.speed));
+    await world.walkPerson(carrier.id, back, { speed: walkSpeed(), end: 'sit' });
+  } finally {
+    proposalCarrierBusy = false;
+    if (!state.running && state.runId === flowAtStart) setStatus('Sẵn sàng', 'idle');
+    renderBoard();
+  }
 }
 
 function sendHRProposal() {
@@ -1974,7 +2008,7 @@ async function runFlow() {
   state.running = false;
   setRunButton(false);
 
-  while (world.hasWalkers() && runId === state.runId) {
+  while (FLOW_ORDER.some((id) => world.people[id]?.walk) && runId === state.runId) {
     const settled = await wait(200, runId);
     if (!settled) return;
   }
