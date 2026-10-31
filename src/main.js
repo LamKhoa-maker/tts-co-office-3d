@@ -1,8 +1,8 @@
 import * as THREE from '../vendor/three.module.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY, LAW_GROUPS, DEPT_SCREENS, HIRE_LOOKS } from './data.js';
-import { COMPANY_STAFF, LEGAL_SOURCES, formatViDate, formatViTime, getDailyPlan, loadAIState, saveAIState, setCompanyStaff } from './hr-ai.js';
-import { loadRoster, saveRoster, loadTasks, saveTasks, makeId } from './staff-store.js';
+import { COMPANY, LEGAL_SOURCES, dayKey, formatViDate, formatViTime, getDailyPlan, loadAIState, loadReports, saveAIState, saveReports, setCompanyStaff } from './hr-ai.js';
+import { loadNotifications, loadRoster, saveNotifications, saveRoster, loadTasks, saveTasks, makeId } from './staff-store.js';
 import { buildWorld, FLOOR_Y } from './world.js';
 
 // ------------------------------------------------------------ renderer
@@ -25,6 +25,8 @@ for (const d of DEPARTMENTS) {
   roster.extras[d.id] = roster.extras[d.id].slice(0, 2);
 }
 const taskState = loadTasks();
+const notifications = loadNotifications();
+let reports = loadReports();
 
 const world = buildWorld(scene, roster.extras);
 
@@ -60,6 +62,7 @@ controls.minPolarAngle = 0.32;
 controls.maxPolarAngle = 1.34;
 controls.enablePan = false;
 controls.autoRotateSpeed = 0.5;
+controls.zoomSpeed = 2;
 
 const camGoal = { pos: defaultPos(), target: DEFAULT_TARGET.clone() };
 let camGoalActive = true;
@@ -353,6 +356,97 @@ function setStepState(id, s) {
     s === 'done' ? '✓' : s === 'active' ? '•' : String(FLOW_ORDER.indexOf(id) + 1);
 }
 
+// ------------------------------------------------------------ notifications
+
+function unreadCount(deptId) {
+  return notifications.reduce((n, x) => n + (x.deptId === deptId && !x.read ? 1 : 0), 0);
+}
+
+function deptNotifs(deptId) {
+  return notifications.filter((n) => n.deptId === deptId);
+}
+
+function notifyDept(deptId, from, text, fromDept = null) {
+  if (!DEPT_MAP[deptId]) return;
+  notifications.unshift({
+    id: makeId('n'),
+    deptId,
+    from,
+    fromDept,
+    text: String(text).slice(0, 160),
+    at: Date.now(),
+    read: false,
+  });
+  saveNotifications(notifications);
+  syncNotifUI(deptId);
+}
+
+function syncNotifUI(deptId) {
+  const chip = chips[deptId];
+  if (chip) {
+    let badge = chip.querySelector('.chip-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'chip-badge';
+      chip.appendChild(badge);
+    }
+    const n = unreadCount(deptId);
+    badge.textContent = n > 9 ? '9+' : String(n);
+    badge.hidden = n === 0;
+  }
+  if (world.setRoomNotif) world.setRoomNotif(deptId, unreadCount(deptId));
+  if (state.selected === deptId && !state.selectedStaff) refreshNotifPanel(deptId);
+}
+
+function syncAllNotifs() {
+  for (const d of DEPARTMENTS) syncNotifUI(d.id);
+}
+
+function notifPanelHTML(d) {
+  const items = deptNotifs(d.id).slice(0, 5);
+  if (!items.length) return '';
+  const unread = items.filter((n) => !n.read).length;
+  return `<div class="notif-panel">
+    <div class="notif-head">
+      <h3><span class="notif-bell">🔔</span>Thông báo tại phòng</h3>
+      <span>${unread ? `${unread} tin mới` : `${items.length} tin`}</span>
+    </div>
+    <ul class="notif-list">
+      ${items.map((n) => {
+        const src = n.fromDept ? DEPT_MAP[n.fromDept] : null;
+        return `<li class="${n.read ? '' : 'is-new'}">
+          <span class="notif-dot" style="background:${src ? src.color : '#e11d48'}"></span>
+          <div class="notif-body">
+            <div class="notif-meta"><strong>${esc(n.from)}</strong><time>${formatViTime(n.at)}</time></div>
+            <p>${esc(n.text)}</p>
+          </div>
+        </li>`;
+      }).join('')}
+    </ul>
+  </div>`;
+}
+
+function refreshNotifPanel(deptId) {
+  const slot = ui.card.querySelector('.notif-slot');
+  const d = DEPT_MAP[deptId];
+  if (!slot || !d) return;
+  slot.innerHTML = notifPanelHTML(d);
+}
+
+function markDeptNotifsRead(deptId) {
+  let changed = false;
+  for (const n of notifications) {
+    if (n.deptId === deptId && !n.read) {
+      n.read = true;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  saveNotifications(notifications);
+  syncNotifUI(deptId);
+}
+
+
 // ------------------------------------------------------------ dept card
 
 function esc(value) {
@@ -432,6 +526,7 @@ function renderCard(d) {
         <h2>${d.name}</h2>
       </div>
     </div>
+    <div class="notif-slot">${notifPanelHTML(d)}</div>
     ${staffListHTML(d)}
     <p class="desc">${d.desc}</p>
     <div class="duties">${d.duties.map((x) => `<span>${x}</span>`).join('')}</div>
@@ -447,7 +542,6 @@ function renderHRCard(d) {
   const plan = syncAI();
   const doneSet = new Set(aiState.done);
   const doneCount = plan.tasks.filter((t) => doneSet.has(t.id)).length;
-  const sent = Boolean(aiState.sentAt);
 
   ui.card.classList.add('is-ai');
   ui.card.innerHTML = `
@@ -459,6 +553,7 @@ function renderHRCard(d) {
         <h2>${d.name}</h2>
       </div>
     </div>
+    <div class="notif-slot">${notifPanelHTML(d)}</div>
     ${staffListHTML(d)}
     ${lawStackHTML(d)}
     <div class="ai-panel">
@@ -466,13 +561,15 @@ function renderHRCard(d) {
         <span class="ai-badge"><span class="ai-dot"></span>AI NHÂN SỰ</span>
         <span class="ai-date">${formatViDate(plan.date)}</span>
       </div>
-      <p class="ai-summary">Đã đọc ${LEGAL_SOURCES.length} văn bản · đối chiếu quy mô ${COMPANY_STAFF} nhân sự · chọn 2 việc ưu tiên cho Giám đốc hôm nay</p>
+      <p class="ai-summary">Công ty thành lập ${COMPANY.label} · đang ở tháng thứ ${plan.months + 1} · đọc ${LEGAL_SOURCES.length} văn bản · xếp hạng ${plan.tasks.length} việc theo mức khẩn cấp</p>
+      <p class="ai-report"><span class="ai-report-ico">⏱</span>Báo cáo tự động <b>09:00</b> hằng ngày tới Giám đốc · <span class="ai-report-next">${reportScheduleText()}</span></p>
       <ol class="ai-tasks">
         ${plan.tasks.map((t) => `
           <li class="ai-task ${doneSet.has(t.id) ? 'is-done' : ''}" data-task="${t.id}">
+            <span class="ai-rank" title="Thứ tự ưu tiên">${t.rank}</span>
             <button class="ai-check" type="button" aria-pressed="${doneSet.has(t.id)}" aria-label="Đánh dấu hoàn thành">${doneSet.has(t.id) ? '✓' : ''}</button>
             <div class="ai-task-body">
-              <span class="ai-pri ${t.priority}">${t.priorityLabel}</span>
+              <span class="ai-pri ${t.level}">${t.priorityLabel}</span>
               <h3>${t.title}</h3>
               <p>${t.detail}</p>
               <div class="ai-meta">
@@ -484,8 +581,8 @@ function renderHRCard(d) {
           </li>`).join('')}
       </ol>
       <div class="ai-foot">
-        <span class="ai-progress">${doneCount}/2 hoàn thành</span>
-        <button class="ai-send" type="button" ${sent ? 'disabled' : ''}>${sent ? '✓ Đã gửi Giám đốc' : 'Gửi Giám đốc'}</button>
+        <span class="ai-progress">${doneCount}/${plan.tasks.length} hoàn thành</span>
+        <button class="ai-send" type="button">Gửi báo cáo ngay</button>
       </div>
       <details class="ai-sources">
         <summary>Nguồn AI đã đọc (${LEGAL_SOURCES.length})</summary>
@@ -514,6 +611,118 @@ function taskHTML(staffId, t) {
   </li>`;
 }
 
+function secretaryPanelHTML() {
+  const opts = DEPARTMENTS.filter((d) => d.id !== 'director')
+    .map((d) => `<option value="${d.id}">${d.icon} ${esc(d.name)}</option>`)
+    .join('');
+  return `<div class="msg-panel">
+    <div class="msg-head">
+      <h3>Thư ký truyền tin</h3>
+      <span class="msg-tag">Từ Giám đốc</span>
+    </div>
+    <p class="msg-hint">Chọn nơi nhận — thư ký chuyển thông điệp tới phòng đó và gắn thông báo tại phòng.</p>
+    <form class="msg-form">
+      <label>Gửi tới<select name="to">
+        <option value="all">Toàn bộ phòng ban</option>${opts}
+      </select></label>
+      <label>Nội dung<textarea name="text" rows="2" maxlength="140" placeholder="VD: Rà soát BOQ dự án trước 16h hôm nay" required></textarea></label>
+      <button type="submit">Gửi thông điệp</button>
+    </form>
+    <p class="msg-status" aria-live="polite"></p>
+  </div>`;
+}
+
+let messageBusy = false;
+
+function flyMessage(to) {
+  return new Promise((resolve) => {
+    const from = DEPT_MAP.director;
+    const group = new THREE.Group();
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: 0xfff7d6, emissive: 0xf59e0b, emissiveIntensity: 1.1, roughness: 0.4,
+    });
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), coreMat);
+    group.add(core);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.85 });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.018, 8, 40), ringMat);
+    ring.rotation.x = Math.PI / 2;
+    group.add(ring);
+    const light = new THREE.PointLight(0xfbbf24, 1.2, 5, 2);
+    group.add(light);
+    scene.add(group);
+
+    const doorZ = to.posZ + (to.posZ < 0 ? WORLD.roomD / 2 : -WORLD.roomD / 2);
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(from.posX, 2.75, from.posZ),
+      new THREE.Vector3(from.posX + 2.2, 3.6, from.posZ + 2.8),
+      new THREE.Vector3(from.posX, 2.7, WORLD.corridorZ),
+      new THREE.Vector3(to.posX, 2.7, WORLD.corridorZ),
+      new THREE.Vector3(to.posX, 2.5, doorZ),
+      new THREE.Vector3(to.posX, 2.4, to.posZ),
+    ], false, 'centripetal');
+
+    const start = performance.now();
+    const dur = 760;
+    const tick = (now) => {
+      const p = Math.min(1, (now - start) / dur);
+      curve.getPointAt(p, group.position);
+      group.position.y += Math.sin(p * Math.PI) * 0.12;
+      ring.rotation.z += 0.18;
+      if (p < 1) {
+        requestAnimationFrame(tick);
+        return;
+      }
+      scene.remove(group);
+      core.geometry.dispose();
+      coreMat.dispose();
+      ring.geometry.dispose();
+      ringMat.dispose();
+      resolve();
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function sendSecretaryMessage(form) {
+  if (messageBusy) return;
+  const data = new FormData(form);
+  const text = String(data.get('text') || '').trim().slice(0, 140);
+  const to = String(data.get('to') || 'all');
+  if (!text) return;
+
+  const targets = to === 'all'
+    ? DEPARTMENTS.filter((d) => d.id !== 'director')
+    : DEPARTMENTS.filter((d) => d.id === to);
+  if (!targets.length) return;
+
+  messageBusy = true;
+  const btn = form.querySelector('button');
+  const status = ui.card.querySelector('.msg-status');
+  const label = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Đang truyền...';
+  }
+  if (status) status.textContent = 'Thư ký đang chuyển thông điệp...';
+
+  await Promise.all(targets.map(flyMessage));
+  for (const d of targets) notifyDept(d.id, 'Thư ký Giám đốc', text, 'director');
+
+  addLog('director', `Thư ký chuyển thông điệp tới ${targets.map((d) => d.short).join(', ')}: ${text}`);
+  showToast(`Thư ký đã truyền thông điệp tới ${targets.length} phòng`, 3800);
+
+  messageBusy = false;
+  if (btn && form.isConnected) {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+  if (status && form.isConnected) {
+    const names = targets.map((d) => d.short).join(', ');
+    status.textContent = `✓ Đã gửi lúc ${formatViTime(Date.now())} tới ${names}`;
+  }
+  form.reset();
+}
+
 function renderStaffCard(d, m) {
   const tasks = staffTasks(m.id);
   const openCount = tasks.filter((t) => !t.done).length;
@@ -532,6 +741,7 @@ function renderStaffCard(d, m) {
     </div>
     <p class="staff-room">${d.icon} ${esc(d.name)}</p>
     ${m.scope ? `<div class="duties"><span>${esc(m.scope)}</span></div>` : ''}
+    ${m.duty === 'secretary' ? secretaryPanelHTML() : ''}
     ${hasLaw ? `<div class="law-stack">${lawBlockHTML(m.lawGroup)}</div>` : `<p class="desc">${esc(d.desc)}</p>`}
     <div class="task-panel">
       <div class="task-head">
@@ -578,6 +788,7 @@ function selectStaff(d, staffId) {
   hideToast();
   renderStaffCard(d, m);
   ui.card.classList.remove('hidden');
+  markDeptNotifsRead(d.id);
 }
 
 function selectRecruit(deptId) {
@@ -647,6 +858,7 @@ function addStaffTask(staffId, text) {
   const d = DEPT_MAP[state.selected];
   const m = d ? membersOf(d).find((x) => x.id === staffId) : null;
   addLog(d ? d.id : null, `Giao việc cho ${m ? m.name : 'nhân sự'}: ${clean}`);
+  if (d) notifyDept(d.id, 'Điều hành', `Giao việc cho ${m ? m.name : 'nhân sự'}: ${clean}`);
   showToast(`Đã giao việc cho ${m ? m.name : 'nhân sự'}`, 2600);
   const input = ui.card.querySelector('.task-form input');
   if (input) input.focus();
@@ -696,44 +908,142 @@ function toggleAITask(li) {
   btn.setAttribute('aria-pressed', String(isDone));
   btn.textContent = isDone ? '✓' : '';
   const count = aiPlan.tasks.filter((t) => doneSet.has(t.id)).length;
-  ui.card.querySelector('.ai-progress').textContent = `${count}/2 hoàn thành`;
+  ui.card.querySelector('.ai-progress').textContent = `${count}/${aiPlan.tasks.length} hoàn thành`;
+}
+
+// ------------------------------------------------------------ daily reports
+
+function docsProcessedToday() {
+  return Object.values(state.stats).reduce((n, s) => n + s.in, 0);
+}
+
+function reportScheduleText() {
+  const now = new Date();
+  const key = dayKey(now);
+  if (reports.lastAuto === key) {
+    const sent = reports.items.find((r) => r.auto && dayKey(new Date(r.at)) === key);
+    return sent ? `hôm nay đã gửi lúc ${formatViTime(sent.at)}` : 'hôm nay đã gửi';
+  }
+  const nine = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0);
+  if (now < nine) {
+    const mins = Math.max(1, Math.round((nine - now) / 60000));
+    return `còn ${Math.floor(mins / 60)} giờ ${mins % 60} phút nữa`;
+  }
+  return 'sẽ gửi bù cho mốc 09:00';
+}
+
+function refreshReportSchedule() {
+  const el = ui.card.querySelector('.ai-report-next');
+  if (el) el.textContent = reportScheduleText();
+}
+
+function buildReport({ auto = false, late = 0 } = {}) {
+  const plan = syncAI();
+  const doneSet = new Set(aiState.done);
+  return {
+    id: makeId('r'),
+    at: Date.now(),
+    auto,
+    late,
+    staff: staffTotal(),
+    docs: docsProcessedToday(),
+    total: plan.tasks.length,
+    tasks: plan.tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      level: t.level,
+      priorityLabel: t.priorityLabel,
+      rank: t.rank,
+      done: doneSet.has(t.id),
+    })),
+  };
+}
+
+function sendDirectorReport({ auto = false, late = 0 } = {}) {
+  const report = buildReport({ auto, late });
+  reports.items.unshift(report);
+  reports.items = reports.items.slice(0, 12);
+  saveReports(reports);
+
+  aiState.sentAt = report.at;
+  saveAIState(aiState);
+
+  const lead = report.tasks[0] ? `ưu tiên 1: ${report.tasks[0].title}` : 'chưa có việc';
+  notifyDept('director', auto ? 'AI Nhân sự · 09:00' : 'AI Nhân sự', `Báo cáo ${report.total} việc — ${lead}`, 'hr');
+  addLog('hr', `${auto ? '09:00 · ' : ''}AI Nhân sự gửi báo cáo ${report.total} việc tới Giám đốc`);
+
+  if (state.selected === 'director' && !state.selectedStaff) renderCard(DEPT_MAP.director);
+  if (state.selected === 'hr' && !state.selectedStaff) refreshReportSchedule();
+
+  return report;
 }
 
 function sendHRProposal() {
-  if (aiState.sentAt) return;
-  aiState.sentAt = Date.now();
-  saveAIState(aiState);
+  sendDirectorReport();
+  showToast('Đã gửi báo cáo tới Giám đốc · Bấm phòng Giám đốc để xem', 4200);
+}
 
-  const btn = ui.card.querySelector('.ai-send');
-  btn.disabled = true;
-  btn.textContent = '✓ Đã gửi Giám đốc';
-  chips.director?.classList.add('has-inbox');
+function autoReportTick() {
+  const now = new Date();
+  const key = dayKey(now);
+  if (reports.lastAuto === key) return;
+  const nine = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0, 0, 0);
+  if (now < nine) return;
 
-  addLog('hr', 'AI Nhân sự gửi 2 đề xuất cho Giám đốc');
-  showToast('Đã gửi 2 đề xuất nhân sự tới Giám đốc · Bấm phòng Giám đốc để xem', 4600);
+  reports.lastAuto = key;
+  const late = Math.round((now - nine) / 60000);
+  const report = sendDirectorReport({ auto: true, late });
+  saveReports(reports);
+  showToast(
+    late > 5
+      ? `AI Nhân sự đã gửi báo cáo 09:00 (bù lúc ${formatViTime(report.at)}) tới Giám đốc`
+      : '09:00 · AI Nhân sự đã gửi báo cáo công việc tới Giám đốc',
+    5200
+  );
 }
 
 function appendDirectorInbox() {
-  const plan = syncAI();
-  if (!aiState.sentAt) return;
+  const today = dayKey();
   const doneSet = new Set(aiState.done);
-  const dotColor = { high: '#e11d48', medium: '#f59e0b', low: '#14b8a6' };
   const box = document.createElement('div');
   box.className = 'inbox';
   box.innerHTML = `
-    <div class="inbox-head">
-      <span class="tag" style="color:#0d9488">Đề xuất từ Nhân sự</span>
-      <span class="inbox-time">${formatViTime(aiState.sentAt)}</span>
-    </div>
-    <ul class="inbox-list">
-      ${plan.tasks.map((t) => `
-        <li class="${doneSet.has(t.id) ? 'is-done' : ''}">
-          <span class="inbox-dot" style="background:${dotColor[t.priority] || dotColor.low}"></span>
-          <span>${t.title}</span>
-          <span class="inbox-state">${doneSet.has(t.id) ? 'Đã xong' : 'Chờ xử lý'}</span>
-        </li>`).join('')}
-    </ul>
-    <p class="inbox-note">AI Nhân sự đề xuất hôm nay · 2 việc</p>`;
+    <div class="live-strip"><span class="live-dot"></span>Báo cáo thời gian thực · ${staffTotal()} nhân sự · ${docsProcessedToday()} hồ sơ hôm nay · ${notifications.filter((n) => !n.read).length} thông báo mới</div>`;
+
+  const list = reports.items.slice(0, 2);
+  if (!list.length) {
+    box.insertAdjacentHTML('beforeend', `
+      <div class="inbox-head">
+        <span class="tag" style="color:#0d9488">Báo cáo từ Nhân sự</span>
+        <span class="inbox-time">09:00 hằng ngày</span>
+      </div>
+      <p class="inbox-note">Chưa có báo cáo. AI Nhân sự sẽ gửi lúc 09:00.</p>`);
+    ui.card.appendChild(box);
+    return;
+  }
+
+  const html = list.map((r) => {
+    const isToday = dayKey(new Date(r.at)) === today;
+    const timeLabel = r.auto
+      ? `09:00${r.late > 5 ? ` · gửi bù ${formatViTime(r.at)}` : ''}`
+      : formatViTime(r.at);
+    const doneNow = (t) => (isToday ? doneSet.has(t.id) : t.done);
+    const doneCount = r.tasks.filter(doneNow).length;
+    return `<div class="inbox-head">
+        <span class="tag" style="color:#0d9488">${r.auto ? 'Báo cáo 09:00' : 'Báo cáo tức thời'}</span>
+        <span class="inbox-time">${timeLabel}${isToday ? '' : ` · ${formatViDate(new Date(r.at))}`}</span>
+      </div>
+      <ol class="inbox-list">
+        ${r.tasks.map((t) => `
+          <li class="${doneNow(t) ? 'is-done' : ''}">
+            <span class="inbox-rank" data-level="${t.level}">${t.rank}</span>
+            <span>${esc(t.title)}</span>
+            <span class="inbox-state">${doneNow(t) ? 'Đã xong' : 'Chờ xử lý'}</span>
+          </li>`).join('')}
+      </ol>
+      <p class="inbox-note">${r.staff} nhân sự · ${r.docs} hồ sơ hôm nay · ${doneCount}/${r.total} việc AI đã xong</p>`;
+  }).join('');
+  box.insertAdjacentHTML('beforeend', html);
   ui.card.appendChild(box);
 }
 
@@ -759,7 +1069,7 @@ function selectDept(id, focus = true) {
   const d = DEPT_MAP[id];
   renderCard(d);
   ui.card.classList.remove('hidden');
-  if (id === 'director') chips.director?.classList.remove('has-inbox');
+  markDeptNotifsRead(id);
 
   if (focus) {
     if (controls.autoRotate) {
@@ -999,6 +1309,7 @@ async function runFlow() {
       state.carrier = id;
       state.tokenMode = 'carry';
       addLog(id, 'Ra cửa nhận hồ sơ từ khách hàng');
+      notifyDept(id, 'Khách hàng', 'Hồ sơ dự án vừa được gửi tới phòng — cần tiếp nhận và xử lý');
       await wait(320 / state.speed, runId);
       if (runId !== state.runId) return;
     } else {
@@ -1026,6 +1337,7 @@ async function runFlow() {
       world.facePerson(id, top ? 0 : Math.PI);
       state.carrier = id;
       addLog(id, `Nhận hồ sơ từ ${from.short}`);
+      notifyDept(id, from.short, `Hồ sơ vừa được chuyển tới từ ${from.short} — cần xử lý`, prev);
       await wait(460 / state.speed, runId);
       if (runId !== state.runId) return;
     }
@@ -1187,6 +1499,12 @@ ui.card.addEventListener('submit', (e) => {
   if (recruitForm) {
     e.preventDefault();
     hireStaff(recruitForm);
+    return;
+  }
+  const msgForm = e.target.closest('.msg-form');
+  if (msgForm) {
+    e.preventDefault();
+    sendSecretaryMessage(msgForm);
   }
 });
 
@@ -1249,14 +1567,22 @@ function animateRooms(t, dt) {
 function start() {
   buildChips();
   updateStaffCount();
+  syncAllNotifs();
 
   addLog(null, 'Mô hình văn phòng TTS.Co đã sẵn sàng');
-  addLog('hr', 'AI Nhân sự đã chuẩn bị 2 đề xuất cho hôm nay');
+  addLog('hr', `AI Nhân sự đã xếp hạng ${aiPlan.tasks.length} việc ưu tiên hôm nay`);
   setStatus('Sẵn sàng', 'idle');
 
   setTimeout(() => {
     showToast('Bấm một phòng rồi bấm từng nhân sự để xem nhiệm vụ · “Chạy quy trình” để mô phỏng dòng hồ sơ', 5600);
   }, 900);
+
+  // báo cáo 09:00: gửi bù ngay khi mở trang sau mốc 9h, sau đó kiểm tra mỗi 20 giây
+  setTimeout(() => {
+    autoReportTick();
+    setInterval(autoReportTick, 20000);
+  }, 6500);
+  setInterval(refreshReportSchedule, 15000);
 
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);

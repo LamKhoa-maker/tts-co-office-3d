@@ -205,33 +205,33 @@ function screenTexture(kind, color) {
       ctx.fillStyle = 'rgba(226,232,240,0.4)';
       ctx.fillRect(14, 166, 120, 6);
     } else if (kind === 'ai') {
-      const rows = ['Hợp đồng lao động', 'Đóng BHXH tháng này'];
+      const rows = ['Hợp đồng lao động', 'Đóng BHXH tháng này', 'Điều kiện kinh doanh PCCC'];
       rows.forEach((label, i) => {
-        const y = 46 + i * 50;
+        const y = 38 + i * 44;
         ctx.fillStyle = 'rgba(20,184,166,0.13)';
-        roundRectPath(ctx, 16, y, w - 32, 40, 8);
+        roundRectPath(ctx, 16, y, w - 32, 36, 8);
         ctx.fill();
         ctx.strokeStyle = 'rgba(20,184,166,0.45)';
         ctx.lineWidth = 1.2;
-        roundRectPath(ctx, 16, y, w - 32, 40, 8);
+        roundRectPath(ctx, 16, y, w - 32, 36, 8);
         ctx.stroke();
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.6;
         ctx.beginPath();
-        ctx.arc(36, y + 20, 8, 0, Math.PI * 2);
+        ctx.arc(36, y + 18, 8, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(32, y + 20);
-        ctx.lineTo(35, y + 24);
-        ctx.lineTo(41, y + 16);
+        ctx.moveTo(32, y + 18);
+        ctx.lineTo(35, y + 22);
+        ctx.lineTo(41, y + 14);
         ctx.stroke();
         ctx.fillStyle = 'rgba(226,232,240,0.85)';
         ctx.font = '600 11px "Segoe UI", sans-serif';
-        ctx.fillText(label, 54, y + 24);
+        ctx.fillText(label, 54, y + 22);
       });
       ctx.fillStyle = 'rgba(153,246,228,0.65)';
       ctx.font = '600 9px "Segoe UI", sans-serif';
-      ctx.fillText('2 VIỆC ƯU TIÊN HÔM NAY', 16, 184);
+      ctx.fillText('4 VIỆC ƯU TIÊN HÔM NAY', 16, 188);
     } else if (kind === 'legal') {
       const docs = ['Điều lệ & nghị quyết', 'Đăng ký doanh nghiệp'];
       docs.forEach((label, i) => {
@@ -419,12 +419,50 @@ function aiHoloTexture() {
     ctx.font = '800 40px "Segoe UI", sans-serif';
     ctx.fillText('AI NHÂN SỰ', 112, 66);
     ctx.fillStyle = 'rgba(153,246,228,0.92)';
-    ctx.font = '600 21px "Segoe UI", sans-serif';
-    ctx.fillText('2 việc hôm nay · đề xuất Giám đốc', 112, 108);
+    ctx.font = '600 19px "Segoe UI", sans-serif';
+    ctx.fillText('4 việc ưu tiên · báo cáo 09:00', 112, 108);
     ctx.fillStyle = 'rgba(94,234,212,0.16)';
     ctx.fillRect(28, 130, w - 56, 3);
   });
 }
+
+function notifTexture(count) {
+  return canvasTexture(320, 144, (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = 'rgba(15,23,42,0.95)';
+    roundRectPath(ctx, 4, 4, w - 8, h - 8, 32);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(225,29,72,0.85)';
+    ctx.lineWidth = 3;
+    roundRectPath(ctx, 4, 4, w - 8, h - 8, 32);
+    ctx.stroke();
+    ctx.fillStyle = '#e11d48';
+    ctx.beginPath();
+    ctx.arc(58, 72, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '38px "Segoe UI Emoji", "Apple Color Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🔔', 58, 74);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = '700 40px "Segoe UI", sans-serif';
+    ctx.fillText(`${count} tin mới`, 106, 64);
+    ctx.fillStyle = 'rgba(203,213,225,0.78)';
+    ctx.font = '500 24px "Segoe UI", sans-serif';
+    ctx.fillText('Bấm phòng để xem', 106, 100);
+  });
+}
+
+const notifTextures = new Map();
+
+function getNotifTexture(count) {
+  const key = Math.min(9, Math.max(1, count));
+  if (!notifTextures.has(key)) notifTextures.set(key, notifTexture(key));
+  return notifTextures.get(key);
+}
+
 
 function clientTexture() {
   return canvasTexture(512, 160, (ctx, w, h) => {
@@ -985,6 +1023,7 @@ function buildRoom(scene, world, d, extras = []) {
     extraMembers: [],
     tags: [],
     mainTag: null,
+    notif: null,
   };
   world.rooms[d.id] = room;
   const isTop = posZ < 0;
@@ -1181,6 +1220,18 @@ function buildRoom(scene, world, d, extras = []) {
   sprite.position.set(posX, 4.3, posZ);
   sprite.renderOrder = 20;
   g.add(sprite);
+
+  // badge thông báo nổi phía trên phòng
+  const notif = new THREE.Sprite(
+    new THREE.SpriteMaterial({ transparent: true, depthWrite: false })
+  );
+  notif.scale.set(2.6, 1.17, 1);
+  notif.position.set(posX, 5.55, posZ);
+  notif.renderOrder = 22;
+  notif.visible = false;
+  g.add(notif);
+  room.notif = notif;
+  room.notifBaseY = 5.55;
 
   // selection / highlight ring
   const ring = new THREE.Mesh(
@@ -1526,6 +1577,22 @@ export function buildWorld(scene, extras = {}) {
 
   world.hasWalkers = () => Object.values(world.people).some((p) => p.walk);
 
+  world.setRoomNotif = (deptId, count) => {
+    const room = world.rooms[deptId];
+    if (!room || !room.notif) return;
+    const n = Math.max(0, Math.min(9, Number(count) || 0));
+    if (n === 0) {
+      room.notif.visible = false;
+      return;
+    }
+    room.notif.material.map = getNotifTexture(n);
+    room.notif.material.needsUpdate = true;
+    if (!room.notif.visible) {
+      room.notif.visible = true;
+      room.notif.scale.set(0.5, 0.225, 1);
+    }
+  };
+
   world.update = (t, dt) => {
     for (const p of Object.values(world.people)) {
       if (!p) continue;
@@ -1560,6 +1627,12 @@ export function buildWorld(scene, extras = {}) {
     if (world.aiHolo) {
       world.aiHolo.position.y = world.aiHolo.userData.baseY + Math.sin(t * 1.35) * 0.05;
       world.aiHolo.material.opacity = 0.82 + 0.12 * Math.sin(t * 2.2);
+    }
+    for (const r of Object.values(world.rooms)) {
+      if (!r.notif || !r.notif.visible) continue;
+      r.notif.position.y = r.notifBaseY + Math.sin(t * 2.2) * 0.08;
+      const s = r.notif.scale.x + (2.6 - r.notif.scale.x) * Math.min(1, dt * 6);
+      r.notif.scale.set(s, s * 0.45, 1);
     }
   };
 
