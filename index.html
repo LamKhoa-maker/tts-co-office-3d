@@ -36,16 +36,30 @@
       </button>
       <button id="btnRotate" class="btn square" type="button" title="Xoay tự động">⟳</button>
       <button id="btnReset" class="btn square" type="button" title="Về góc nhìn mặc định">⌂</button>
+      <button id="btnDash" class="btn dash-btn" type="button" aria-controls="boardPanel" aria-expanded="false" title="Dashboard điều hành">
+        <span class="ico">▤</span><span class="label">Điều hành</span>
+      </button>
     </div>
 
     <aside id="deptCard" class="panel glass hidden" aria-live="polite"></aside>
 
-    <aside class="panel glass board-panel">
+    <aside class="panel glass board-panel" id="boardPanel">
       <div class="panel-head">
-        <h2><span class="live-dot"></span>Bảng tin hàng ngày</h2>
+        <h2 class="sr-only">Bảng tin hàng ngày</h2>
+        <div class="panel-tabs" role="tablist" aria-label="Bảng tin và điều hành">
+          <button id="tabBoard" class="panel-tab" type="button" role="tab" aria-selected="true" aria-controls="boardView"><span class="live-dot"></span>Bảng tin</button>
+          <button id="tabDash" class="panel-tab" type="button" role="tab" aria-selected="false" aria-controls="dashView">▤ Điều hành</button>
+        </div>
         <span class="board-date" id="boardDate"></span>
+        <button id="panelClose" class="panel-close" type="button" aria-label="Đóng bảng điều hành">×</button>
       </div>
-      <ul class="board-list" id="boardList"></ul>
+      <div class="panel-view" id="boardView" role="tabpanel" aria-labelledby="tabBoard">
+        <ul class="board-list" id="boardList"></ul>
+      </div>
+      <div class="panel-view hidden" id="dashView" role="tabpanel" aria-labelledby="tabDash">
+        <div class="dash-top"><span id="dashAsOf">Dữ liệu mẫu</span><span class="dash-sample">Dữ liệu mẫu</span></div>
+        <div class="dash-scroll" id="dashBody"></div>
+      </div>
     </aside>
 
     <div class="flow glass">

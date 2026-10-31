@@ -3,6 +3,7 @@ import { OrbitControls } from '../vendor/OrbitControls.js';
 import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY, LAW_GROUPS, DEPT_SCREENS, HIRE_LOOKS } from './data.js';
 import { COMPANY, LEGAL_SOURCES, dayKey, formatViDate, formatViTime, getDailyPlan, loadAIState, loadReports, saveAIState, saveReports, setCompanyStaff } from './hr-ai.js';
 import { loadBoard, loadNotifications, loadRoster, saveBoard, saveNotifications, saveRoster, loadTasks, saveTasks, makeId } from './staff-store.js';
+import { SAMPLE_LABEL, PLAYBOOK, fmtVnd, getBusinessSnapshot, getSampleAlerts, getDashboardModel, getDepartmentKpis } from './business.js';
 import { buildWorld, FLOOR_Y } from './world.js';
 
 // ------------------------------------------------------------ renderer
@@ -100,6 +101,8 @@ const state = {
   bubbleDept: null,
   stepStatus: Object.fromEntries(FLOW_ORDER.map((id) => [id, 'pending'])),
   stats: Object.fromEntries(DEPARTMENTS.map((d) => [d.id, { in: 0, out: 0 }])),
+  panelTab: 'board',
+  dashDay: dayKey(),
 };
 
 // ------------------------------------------------------------ HR AI
@@ -267,7 +270,16 @@ const ui = {
   card: document.getElementById('deptCard'),
   staffCount: document.getElementById('staffCount'),
   boardDate: document.getElementById('boardDate'),
+  boardPanel: document.getElementById('boardPanel'),
+  boardView: document.getElementById('boardView'),
   boardList: document.getElementById('boardList'),
+  tabBoard: document.getElementById('tabBoard'),
+  tabDash: document.getElementById('tabDash'),
+  dashView: document.getElementById('dashView'),
+  dashBody: document.getElementById('dashBody'),
+  dashAsOf: document.getElementById('dashAsOf'),
+  panelClose: document.getElementById('panelClose'),
+  dashBtn: document.getElementById('btnDash'),
   flowSteps: document.getElementById('flowSteps'),
   bubble: document.getElementById('bubble'),
   toast: document.getElementById('toast'),
@@ -322,16 +334,79 @@ function boardBump(deptId, field, n = 1) {
   renderBoard();
 }
 
+function deptTaskCounts(deptId) {
+  const d = DEPT_MAP[deptId];
+  const tasks = d ? membersOf(d).flatMap((m) => staffTasks(m.id)) : [];
+  const done = tasks.filter((t) => t.done).length;
+  return { open: tasks.length - done, done, total: tasks.length };
+}
+
+function aiCounts() {
+  const done = new Set(aiState.done);
+  const approved = new Set(aiState.approved);
+  const total = aiPlan.tasks.length;
+  const doneCount = aiPlan.tasks.filter((t) => done.has(t.id)).length;
+  const approvedCount = aiPlan.tasks.filter((t) => approved.has(t.id) && !done.has(t.id)).length;
+  return { total, done: doneCount, approved: approvedCount, open: total - doneCount - approvedCount };
+}
+
+function pendingProposalTasks() {
+  const today = dayKey();
+  const approved = new Set(aiState.approved);
+  const done = new Set(aiState.done);
+  const seen = new Set();
+  const list = [];
+  for (const r of reports.items) {
+    if (dayKey(new Date(r.at)) !== today) continue;
+    for (const t of r.tasks || []) {
+      if (t.done || done.has(t.id) || approved.has(t.id) || seen.has(t.id)) continue;
+      seen.add(t.id);
+      list.push({ ...t, reportId: r.id });
+    }
+  }
+  return list;
+}
+
+function workMetrics(deptId) {
+  const c = deptTaskCounts(deptId);
+  const waiting = pendingProposalTasks().length;
+  if (deptId === 'hr') {
+    const ai = aiCounts();
+    return { doing: c.open + ai.approved, done: c.done + ai.done, waiting };
+  }
+  return { doing: c.open, done: c.done, waiting: deptId === 'director' ? waiting : 0 };
+}
+
+function boardHeadline(d) {
+  const m = workMetrics(d.id);
+  if (d.id === 'hr') return `${aiPlan.tasks.length} đề xuất · ${m.waiting} chờ duyệt`;
+  if (d.id === 'director') return m.waiting ? `${m.waiting} chờ duyệt` : 'Không có việc chờ';
+  const b = boardDept(d.id);
+  return `${b.in} nhận · ${b.out} xong`;
+}
+
+function boardLineHTML(d) {
+  if (d.id === 'hr') {
+    const ai = aiCounts();
+    return `AI <b>${ai.done}/${ai.total}</b> việc xong · <b>${ai.open}</b> chờ Giám đốc duyệt`;
+  }
+  const c = deptTaskCounts(d.id);
+  if (!c.total) return d.id === 'director' ? 'Đề xuất AI đang chờ trên thẻ phòng' : 'Chưa giao việc';
+  const open = membersOf(d).flatMap((m) => staffTasks(m.id)).filter((t) => !t.done);
+  return `<b>${c.done}/${c.total}</b> việc xong${open.length ? ` · đang làm: ${esc(open[0].text)}` : ''}`;
+}
+
+function boardMetricsHTML(deptId) {
+  const m = workMetrics(deptId);
+  return `<div class="board-metrics">
+    <span class="is-doing">Đang làm <b>${m.doing}</b></span>
+    ${m.waiting ? `<span class="is-wait">Chờ duyệt <b>${m.waiting}</b></span>` : ''}
+    <span class="is-done">Hoàn tất <b>${m.done}</b></span>
+  </div>`;
+}
+
 function boardDeptHTML(d) {
   const b = boardDept(d.id);
-  const members = membersOf(d);
-  const tasks = members.flatMap((m) => staffTasks(m.id));
-  const open = tasks.filter((t) => !t.done);
-  const aiDone = d.id === 'hr' ? aiPlan.tasks.filter((t) => aiState.done.includes(t.id)).length : 0;
-  const work = tasks.length
-    ? `<b>${tasks.length - open.length}/${tasks.length}</b> việc xong${open.length ? ` · đang làm: ${esc(open[0].text)}` : ''}`
-    : 'Chưa giao việc';
-  const ai = d.id === 'hr' ? ` · AI ${aiDone}/${aiPlan.tasks.length}` : '';
   const feed = b.actions.slice(0, 2)
     .map((a) => `<li><time>${formatViTime(a.at)}</time><span>${esc(a.text)}</span></li>`)
     .join('');
@@ -339,9 +414,10 @@ function boardDeptHTML(d) {
     <div class="board-head">
       <span class="board-dot"></span>
       <strong>${d.icon} ${esc(d.short)}</strong>
-      <span class="board-count">${b.in} nhận · ${b.out} xong</span>
+      <span class="board-count">${boardHeadline(d)}</span>
     </div>
-    <div class="board-line">${work}${ai}</div>
+    <div class="board-line">${boardLineHTML(d)}</div>
+    ${boardMetricsHTML(d.id)}
     ${feed ? `<ul class="board-feed">${feed}</ul>` : '<p class="board-empty">Chưa ghi nhận hoạt động hôm nay.</p>'}
   </li>`;
 }
@@ -355,6 +431,7 @@ function renderBoard() {
     });
   }
   ui.boardList.innerHTML = DEPARTMENTS.map(boardDeptHTML).join('');
+  queueDashRefresh();
 }
 
 let toastTimer = null;
@@ -630,9 +707,11 @@ function renderCard(d) {
       </div>
     </div>
     <div class="notif-slot">${notifPanelHTML(d)}</div>
+    ${d.id === 'director' ? directorSummaryHTML() : ''}
     ${staffListHTML(d)}
     <p class="desc">${d.desc}</p>
     <div class="duties">${d.duties.map((x) => `<span>${x}</span>`).join('')}</div>
+    ${playbookHTML(d.id)}
     ${lawStackHTML(d)}
     <div class="stats">
       <div><strong id="statIn">${state.stats[d.id].in}</strong><span>Hồ sơ nhận</span></div>
@@ -661,6 +740,7 @@ function renderHRCard(d) {
     <div class="notif-slot">${notifPanelHTML(d)}</div>
     ${staffListHTML(d)}
     ${lawStackHTML(d)}
+    ${playbookHTML('hr')}
     <div class="ai-panel">
       <div class="ai-head">
         <span class="ai-badge"><span class="ai-dot"></span>AI NHÂN SỰ</span>
@@ -1342,6 +1422,213 @@ function appendDirectorInbox() {
   ui.card.appendChild(box);
 }
 
+// ------------------------------------------------------------ operations dashboard
+
+let dashFrame = null;
+
+function liveOps(now = new Date()) {
+  const pendingList = pendingProposalTasks();
+  const ai = aiCounts();
+  const tasksByDept = {};
+  const deptRows = [];
+  let staffOpen = 0;
+  let staffDone = 0;
+  for (const d of DEPARTMENTS) {
+    const c = deptTaskCounts(d.id);
+    tasksByDept[d.id] = c;
+    staffOpen += c.open;
+    staffDone += c.done;
+    deptRows.push({ id: d.id, short: d.short, color: d.color, open: c.open, done: c.done });
+  }
+  const latest = reports.items[0] || null;
+  return {
+    now,
+    docsToday: docsProcessedToday(),
+    staffTotal: staffTotal(),
+    pendingApprovals: pendingList.length,
+    pendingList,
+    tasksOpen: staffOpen + ai.approved,
+    tasksDone: staffDone + ai.done,
+    tasksByDept,
+    deptRows,
+    ai,
+    hr: { open: ai.open, done: ai.done, total: ai.total },
+    lastReportAt: latest && dayKey(new Date(latest.at)) === dayKey(now) ? latest.at : null,
+  };
+}
+
+function dashRowsHTML(rows = []) {
+  return `<div class="dash-rows">${rows.map((r) => `
+    <div class="dash-row${r.tone ? ` is-${r.tone}` : ''}">
+      <div class="dash-row-top"><span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>
+      <p>${esc(r.note || '')}${r.sample ? '<em class="dash-sample is-mini">mẫu</em>' : ''}</p>
+    </div>`).join('')}</div>`;
+}
+
+function dashDeptsHTML(depts = []) {
+  const total = depts.reduce((n, d) => n + d.open + d.done, 0);
+  if (!total) {
+    return '<p class="dash-empty">Chưa có việc được giao — duyệt đề xuất AI hoặc giao việc trong thẻ phòng.</p>';
+  }
+  const max = Math.max(1, ...depts.map((d) => d.open + d.done));
+  return `<div class="dash-depts">${depts.map((d) => `
+    <div class="dash-dept" style="--c:${d.color}">
+      <span class="dash-dept-dot"></span>
+      <span class="dash-dept-name">${esc(d.short)}</span>
+      <span class="dash-dept-bar"><i style="width:${Math.round(((d.open + d.done) / max) * 100)}%"></i></span>
+      <b>${d.open}</b>
+    </div>`).join('')}</div>`;
+}
+
+const ALERT_LEVEL_LABEL = { urgent: 'Gấp', high: 'Ưu tiên', medium: 'Theo dõi' };
+
+function dashAlertsHTML(alerts = []) {
+  if (!alerts.length) return '<p class="dash-empty">Không có cảnh báo cần quyết.</p>';
+  return `<ul class="dash-alert-list">${alerts.map((a) => `
+    <li class="dash-alert is-${a.level}">
+      <div class="dash-alert-top">
+        <span class="dash-alert-level">${ALERT_LEVEL_LABEL[a.level] || 'Theo dõi'}</span>
+        <strong>${esc(a.title)}</strong>
+      </div>
+      <p>${esc(a.detail)}</p>
+      <em>${esc(a.meta)}</em>
+    </li>`).join('')}</ul>`;
+}
+
+function dashCadenceHTML(cadence = []) {
+  return `<ul class="dash-cadence">${cadence.map((c) => `
+    <li>
+      <time>${esc(c.when)}</time>
+      <div><b>${esc(c.owner)}</b><span>${esc(c.text)}</span></div>
+    </li>`).join('')}</ul>`;
+}
+
+function dashboardHTML(model) {
+  return `
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Kết quả kinh doanh</h3><span>Quy mô &amp; thu tiền</span></div>
+      <div class="dash-hero">${model.hero.map((t) => `
+        <div class="dash-tile${t.tone ? ` is-${t.tone}` : ''}">
+          <span>${esc(t.label)}</span>
+          <strong>${esc(t.value)}</strong>
+          <em>${esc(t.note)}</em>
+        </div>`).join('')}</div>
+    </section>
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Kinh doanh</h3><span>Pipeline &amp; hợp đồng</span></div>
+      ${dashRowsHTML(model.sales.rows)}
+    </section>
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Tài chính</h3><span>Công nợ &amp; thuế</span></div>
+      <div class="dash-aging">${model.finance.aging.map((a) => `
+        <div class="dash-aging-row${a.key === 'current' ? '' : ` is-${a.key}`}">
+          <div class="dash-aging-head"><span>${esc(a.label)}</span><b>${fmtVnd(a.value)}</b></div>
+          <div class="dash-bar"><i style="width:${a.pct}%"></i></div>
+        </div>`).join('')}</div>
+      ${dashRowsHTML(model.finance.rows)}
+    </section>
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Vận hành hôm nay</h3><span>Dữ liệu thực</span></div>
+      ${dashRowsHTML(model.ops.rows)}
+      <div class="dash-sub">Việc đang làm theo phòng</div>
+      ${dashDeptsHTML(model.ops.depts)}
+    </section>
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Nhân sự &amp; pháp lý</h3><span>Định biên 8 người</span></div>
+      ${dashRowsHTML(model.people.rows)}
+    </section>
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Cần quyết hôm nay</h3><span>${model.alerts.length} cảnh báo</span></div>
+      ${dashAlertsHTML(model.alerts)}
+    </section>
+    <section class="dash-sec">
+      <div class="dash-sec-title"><h3>Nhịp điều hành</h3><span>Báo cáo định kỳ</span></div>
+      ${dashCadenceHTML(model.cadence)}
+    </section>`;
+}
+
+function renderDashboard({ force = false } = {}) {
+  if (!ui.dashBody) return;
+  if (!force && state.panelTab !== 'dash') return;
+  const now = new Date();
+  const live = liveOps(now);
+  const model = getDashboardModel(live, now);
+  const scroll = ui.dashBody.scrollTop;
+  if (ui.dashAsOf) ui.dashAsOf.textContent = `Cập nhật ${formatViTime(now)}`;
+  ui.dashBody.innerHTML = dashboardHTML(model);
+  ui.dashBody.scrollTop = scroll;
+}
+
+function queueDashRefresh() {
+  if (dashFrame) return;
+  dashFrame = requestAnimationFrame(() => {
+    dashFrame = null;
+    renderDashboard();
+  });
+}
+
+function setPanelTab(tab) {
+  state.panelTab = tab === 'dash' ? 'dash' : 'board';
+  const dash = state.panelTab === 'dash';
+  if (ui.tabBoard) ui.tabBoard.setAttribute('aria-selected', String(!dash));
+  if (ui.tabDash) ui.tabDash.setAttribute('aria-selected', String(dash));
+  ui.boardView?.classList.toggle('hidden', dash);
+  ui.dashView?.classList.toggle('hidden', !dash);
+  ui.boardPanel?.classList.toggle('is-dash', dash);
+  if (dash) renderDashboard({ force: true });
+}
+
+function openPanel(tab = 'dash') {
+  setPanelTab(tab);
+  ui.boardPanel?.classList.add('is-open');
+  ui.dashBtn?.setAttribute('aria-expanded', 'true');
+  if (window.matchMedia('(max-width: 980px)').matches) deselect();
+  renderDashboard({ force: true });
+}
+
+function closePanelSheet() {
+  ui.boardPanel?.classList.remove('is-open');
+  ui.dashBtn?.setAttribute('aria-expanded', 'false');
+}
+
+function directorSummaryHTML() {
+  const now = new Date();
+  const live = liveOps(now);
+  const snapshot = getBusinessSnapshot(now);
+  const alerts = getSampleAlerts(snapshot, live, now);
+  const top = alerts[0];
+  return `<div class="kpi-block">
+    <div class="kpi-head"><span>Điều hành</span><em class="dash-sample">${SAMPLE_LABEL}</em></div>
+    <div class="kpi-grid">
+      <div class="kpi-tile"><span>Hợp đồng ký mới</span><b>${fmtVnd(snapshot.signedValue)}</b></div>
+      <div class="kpi-tile is-bad"><span>Công nợ quá hạn</span><b>${fmtVnd(snapshot.overdue)}</b></div>
+      <div class="kpi-tile${live.pendingApprovals ? ' is-warn' : ''}"><span>Việc chờ duyệt</span><b>${live.pendingApprovals}</b></div>
+      <div class="kpi-tile"><span>Hồ sơ hôm nay</span><b>${live.docsToday}</b></div>
+    </div>
+    ${top
+      ? `<p class="kpi-alert is-${top.level}"><b>${esc(top.title)}</b><span>${esc(top.detail)}</span></p>`
+      : '<p class="kpi-alert is-ok">Không có cảnh báo ưu tiên.</p>'}
+    <button class="dash-open" type="button" data-open-dash>Mở dashboard điều hành ›</button>
+  </div>`;
+}
+
+function playbookHTML(deptId) {
+  const playbook = PLAYBOOK[deptId];
+  if (!playbook) return '';
+  const kpis = getDepartmentKpis(liveOps(), new Date())[deptId] || [];
+  return `<div class="playbook">
+    <div class="pb-head"><h3>Quy trình vận hành</h3><span>4 bước</span></div>
+    <ol class="pb-steps">${playbook.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+    <div class="pb-head"><h3>Chỉ số kiểm soát</h3><span>${kpis.length} chỉ số</span></div>
+    <div class="pb-kpis">${kpis.map((k) => `
+      <div class="pb-kpi${k.tone ? ` is-${k.tone}` : ''}">
+        <span>${esc(k.label)}</span>
+        <b>${esc(k.value)}</b>
+        ${k.sample ? '<em class="pb-sample">mẫu</em>' : ''}
+      </div>`).join('')}</div>
+  </div>`;
+}
+
 function updateStatsUI(id) {
   if (state.selected !== id) return;
   const inEl = document.getElementById('statIn');
@@ -1365,6 +1652,7 @@ function selectDept(id, focus = true) {
   const d = DEPT_MAP[id];
   renderCard(d);
   ui.card.classList.remove('hidden');
+  if (ui.boardPanel?.classList.contains('is-open')) closePanelSheet();
   markDeptNotifsRead(id);
 
   if (focus) {
@@ -1749,12 +2037,20 @@ canvas.addEventListener('pointerup', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') deselect();
+  if (e.key !== 'Escape') return;
+  if (ui.boardPanel?.classList.contains('is-open')) {
+    closePanelSheet();
+    return;
+  }
+  deselect();
 });
 
 ui.card.addEventListener('click', (e) => {
   const close = e.target.closest('.close');
   if (close) { deselect(); return; }
+
+  const openDash = e.target.closest('[data-open-dash]');
+  if (openDash) { openPanel('dash'); return; }
 
   const dismissBtn = e.target.closest('.dismiss-btn');
   if (dismissBtn) { armDismiss(dismissBtn.dataset.dismiss); return; }
@@ -1812,6 +2108,14 @@ ui.card.addEventListener('submit', (e) => {
 });
 
 ui.run.addEventListener('click', runFlow);
+
+ui.tabBoard?.addEventListener('click', () => setPanelTab('board'));
+ui.tabDash?.addEventListener('click', () => setPanelTab('dash'));
+ui.panelClose?.addEventListener('click', closePanelSheet);
+ui.dashBtn?.addEventListener('click', () => {
+  if (ui.boardPanel?.classList.contains('is-open')) closePanelSheet();
+  else openPanel('dash');
+});
 
 ui.speed.addEventListener('click', () => {
   state.speed = state.speed === 1 ? 2 : state.speed === 2 ? 4 : 1;
@@ -1888,6 +2192,15 @@ function start() {
     setInterval(autoReportTick, 20000);
   }, 6500);
   setInterval(refreshReportSchedule, 15000);
+  setInterval(() => {
+    const key = dayKey();
+    if (key === state.dashDay) return;
+    state.dashDay = key;
+    syncAI();
+    syncBoardDay();
+    renderBoard();
+    renderDashboard({ force: true });
+  }, 20000);
 
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
