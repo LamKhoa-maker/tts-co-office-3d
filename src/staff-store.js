@@ -1,17 +1,21 @@
 const ROSTER_KEY = 'tts-office-roster-v1';
 const TASK_KEY = 'tts-office-tasks-v1';
 const NOTIFY_KEY = 'tts-office-notify-v1';
+const BOARD_KEY = 'tts-office-board-v1';
 
 export function loadRoster() {
   try {
     const raw = JSON.parse(localStorage.getItem(ROSTER_KEY) || 'null');
     if (raw && raw.extras && typeof raw.extras === 'object') {
-      return { extras: raw.extras };
+      return {
+        extras: raw.extras,
+        dismissed: raw.dismissed && typeof raw.dismissed === 'object' ? raw.dismissed : {},
+      };
     }
   } catch {
     /* ignore corrupt storage */
   }
-  return { extras: {} };
+  return { extras: {}, dismissed: {} };
 }
 
 export function saveRoster(roster) {
@@ -59,6 +63,26 @@ export function loadNotifications() {
 export function saveNotifications(list) {
   try {
     localStorage.setItem(NOTIFY_KEY, JSON.stringify(list.slice(0, 40)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function loadBoard(dateKey) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BOARD_KEY) || 'null');
+    if (raw && raw.date === dateKey && raw.depts && typeof raw.depts === 'object') {
+      return { date: raw.date, depts: raw.depts };
+    }
+  } catch {
+    /* ignore corrupt storage */
+  }
+  return { date: dateKey, depts: {} };
+}
+
+export function saveBoard(board) {
+  try {
+    localStorage.setItem(BOARD_KEY, JSON.stringify(board));
   } catch {
     /* storage unavailable */
   }

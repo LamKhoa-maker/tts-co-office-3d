@@ -2,7 +2,7 @@ import * as THREE from '../vendor/three.module.js';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { DEPARTMENTS, DEPT_MAP, FLOW_ORDER, WORLD, ENTRY, LAW_GROUPS, DEPT_SCREENS, HIRE_LOOKS } from './data.js';
 import { COMPANY, LEGAL_SOURCES, dayKey, formatViDate, formatViTime, getDailyPlan, loadAIState, loadReports, saveAIState, saveReports, setCompanyStaff } from './hr-ai.js';
-import { loadNotifications, loadRoster, saveNotifications, saveRoster, loadTasks, saveTasks, makeId } from './staff-store.js';
+import { loadBoard, loadNotifications, loadRoster, saveBoard, saveNotifications, saveRoster, loadTasks, saveTasks, makeId } from './staff-store.js';
 import { buildWorld, FLOOR_Y } from './world.js';
 
 // ------------------------------------------------------------ renderer
@@ -20,15 +20,21 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 300);
 
 const roster = loadRoster();
+const dismissed = {};
 for (const d of DEPARTMENTS) {
   if (!Array.isArray(roster.extras[d.id])) roster.extras[d.id] = [];
   roster.extras[d.id] = roster.extras[d.id].slice(0, 2);
+  const protectedIds = new Set(
+    (d.staffList?.length ? d.staffList : [{ id: d.id }]).slice(1).map((m) => m.id)
+  );
+  const saved = Array.isArray(roster.dismissed[d.id]) ? roster.dismissed[d.id] : [];
+  dismissed[d.id] = [...new Set(saved)].filter((id) => protectedIds.has(id));
 }
 const taskState = loadTasks();
 const notifications = loadNotifications();
 let reports = loadReports();
 
-const world = buildWorld(scene, roster.extras);
+const world = buildWorld(scene, roster.extras, dismissed);
 
 // ------------------------------------------------------------ controls
 
@@ -94,7 +100,6 @@ const state = {
   bubbleDept: null,
   stepStatus: Object.fromEntries(FLOW_ORDER.map((id) => [id, 'pending'])),
   stats: Object.fromEntries(DEPARTMENTS.map((d) => [d.id, { in: 0, out: 0 }])),
-  logCount: 0,
 };
 
 // ------------------------------------------------------------ HR AI
@@ -261,8 +266,8 @@ const ui = {
   reset: document.getElementById('btnReset'),
   card: document.getElementById('deptCard'),
   staffCount: document.getElementById('staffCount'),
-  logList: document.getElementById('logList'),
-  logCount: document.getElementById('logCount'),
+  boardDate: document.getElementById('boardDate'),
+  boardList: document.getElementById('boardList'),
   flowSteps: document.getElementById('flowSteps'),
   bubble: document.getElementById('bubble'),
   toast: document.getElementById('toast'),
@@ -277,24 +282,79 @@ function setStatus(text, mode = 'idle') {
   ui.statusChip.dataset.state = mode;
 }
 
-function fmtTime() {
-  return new Date().toLocaleTimeString('vi-VN', { hour12: false });
+// ------------------------------------------------------------ daily board
+
+let board = loadBoard(dayKey());
+
+function syncBoardDay() {
+  const key = dayKey();
+  if (board.date !== key) board = loadBoard(key);
+}
+
+function boardDept(deptId) {
+  let b = board.depts[deptId];
+  if (!b || typeof b !== 'object') {
+    b = { in: 0, out: 0, actions: [] };
+    board.depts[deptId] = b;
+  }
+  b.in = Number(b.in) || 0;
+  b.out = Number(b.out) || 0;
+  if (!Array.isArray(b.actions)) b.actions = [];
+  return b;
 }
 
 function addLog(deptId, text) {
-  const d = deptId ? DEPT_MAP[deptId] : null;
-  const li = document.createElement('li');
-  const dot = d ? d.color : '#94a3b8';
-  li.innerHTML = `
-    <span class="log-dot" style="background:${dot}"></span>
-    <div>
-      <div class="log-top"><strong>${d ? d.short : 'Hệ thống'}</strong><time>${fmtTime()}</time></div>
-      <p>${text}</p>
-    </div>`;
-  ui.logList.prepend(li);
-  while (ui.logList.children.length > 8) ui.logList.lastChild.remove();
-  state.logCount += 1;
-  ui.logCount.textContent = state.logCount;
+  if (!deptId || !DEPT_MAP[deptId]) return;
+  syncBoardDay();
+  const b = boardDept(deptId);
+  b.actions.unshift({ at: Date.now(), text: String(text ?? '').slice(0, 130) });
+  b.actions = b.actions.slice(0, 8);
+  saveBoard(board);
+  renderBoard();
+}
+
+function boardBump(deptId, field, n = 1) {
+  if (!deptId || !DEPT_MAP[deptId]) return;
+  syncBoardDay();
+  const b = boardDept(deptId);
+  b[field] = (Number(b[field]) || 0) + n;
+  saveBoard(board);
+  renderBoard();
+}
+
+function boardDeptHTML(d) {
+  const b = boardDept(d.id);
+  const members = membersOf(d);
+  const tasks = members.flatMap((m) => staffTasks(m.id));
+  const open = tasks.filter((t) => !t.done);
+  const aiDone = d.id === 'hr' ? aiPlan.tasks.filter((t) => aiState.done.includes(t.id)).length : 0;
+  const work = tasks.length
+    ? `<b>${tasks.length - open.length}/${tasks.length}</b> việc xong${open.length ? ` · đang làm: ${esc(open[0].text)}` : ''}`
+    : 'Chưa giao việc';
+  const ai = d.id === 'hr' ? ` · AI ${aiDone}/${aiPlan.tasks.length}` : '';
+  const feed = b.actions.slice(0, 2)
+    .map((a) => `<li><time>${formatViTime(a.at)}</time><span>${esc(a.text)}</span></li>`)
+    .join('');
+  return `<li class="board-dept" style="--c:${d.color}">
+    <div class="board-head">
+      <span class="board-dot"></span>
+      <strong>${d.icon} ${esc(d.short)}</strong>
+      <span class="board-count">${b.in} nhận · ${b.out} xong</span>
+    </div>
+    <div class="board-line">${work}${ai}</div>
+    ${feed ? `<ul class="board-feed">${feed}</ul>` : '<p class="board-empty">Chưa ghi nhận hoạt động hôm nay.</p>'}
+  </li>`;
+}
+
+function renderBoard() {
+  if (!ui.boardList) return;
+  syncBoardDay();
+  if (ui.boardDate) {
+    ui.boardDate.textContent = new Date().toLocaleDateString('vi-VN', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+  }
+  ui.boardList.innerHTML = DEPARTMENTS.map(boardDeptHTML).join('');
 }
 
 let toastTimer = null;
@@ -457,9 +517,11 @@ function esc(value) {
 
 function membersOf(d) {
   const base = d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
-  const ids = new Set(base.map((m) => m.id));
+  const gone = new Set(dismissed[d.id] || []);
+  const kept = base.filter((m, i) => i === 0 || !gone.has(m.id));
+  const ids = new Set(kept.map((m) => m.id));
   const extras = (roster.extras[d.id] || []).filter((m) => m && !ids.has(m.id));
-  return [...base, ...extras].slice(0, 3);
+  return [...kept, ...extras].slice(0, 3);
 }
 
 function staffTotal() {
@@ -617,70 +679,59 @@ function secretaryPanelHTML() {
     .join('');
   return `<div class="msg-panel">
     <div class="msg-head">
-      <h3>Thư ký truyền tin</h3>
-      <span class="msg-tag">Từ Giám đốc</span>
+      <h3>Giám đốc giao thư ký</h3>
+      <span class="msg-tag">Thư ký đi bộ</span>
     </div>
-    <p class="msg-hint">Chọn nơi nhận — thư ký chuyển thông điệp tới phòng đó và gắn thông báo tại phòng.</p>
+    <p class="msg-hint">Giám đốc giao thông điệp — thư ký rời bàn, đi bộ sang từng phòng để đưa tin rồi quay về.</p>
     <form class="msg-form">
       <label>Gửi tới<select name="to">
         <option value="all">Toàn bộ phòng ban</option>${opts}
       </select></label>
       <label>Nội dung<textarea name="text" rows="2" maxlength="140" placeholder="VD: Rà soát BOQ dự án trước 16h hôm nay" required></textarea></label>
-      <button type="submit">Gửi thông điệp</button>
+      <button type="submit">Giao thư ký đưa tin</button>
     </form>
     <p class="msg-status" aria-live="polite"></p>
   </div>`;
 }
 
+const SECRETARY_ID = 'director-secretary';
 let messageBusy = false;
 
-function flyMessage(to) {
-  return new Promise((resolve) => {
-    const from = DEPT_MAP.director;
-    const group = new THREE.Group();
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0xfff7d6, emissive: 0xf59e0b, emissiveIntensity: 1.1, roughness: 0.4,
-    });
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 10), coreMat);
-    group.add(core);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.85 });
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.018, 8, 40), ringMat);
-    ring.rotation.x = Math.PI / 2;
-    group.add(ring);
-    const light = new THREE.PointLight(0xfbbf24, 1.2, 5, 2);
-    group.add(light);
-    scene.add(group);
+function secretaryStartPath() {
+  const d = DEPT_MAP.director;
+  return [
+    floorPoint(4.55, -11.5),
+    floorPoint(4.55, -12.5),
+    floorPoint(2.8, -12.5),
+    floorPoint(2.8, -8.3),
+    floorPoint(0, -8.3),
+    floorPoint(0, innerDoorZ(d)),
+    floorPoint(0, outerDoorZ(d)),
+  ];
+}
 
-    const doorZ = to.posZ + (to.posZ < 0 ? WORLD.roomD / 2 : -WORLD.roomD / 2);
-    const curve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(from.posX, 2.75, from.posZ),
-      new THREE.Vector3(from.posX + 2.2, 3.6, from.posZ + 2.8),
-      new THREE.Vector3(from.posX, 2.7, WORLD.corridorZ),
-      new THREE.Vector3(to.posX, 2.7, WORLD.corridorZ),
-      new THREE.Vector3(to.posX, 2.5, doorZ),
-      new THREE.Vector3(to.posX, 2.4, to.posZ),
-    ], false, 'centripetal');
+function secretaryTargetPath(fromX, to) {
+  return [
+    floorPoint(fromX, WORLD.corridorZ),
+    floorPoint(to.posX, WORLD.corridorZ),
+    floorPoint(to.posX, outerDoorZ(to)),
+    floorPoint(to.posX, innerDoorZ(to)),
+  ];
+}
 
-    const start = performance.now();
-    const dur = 760;
-    const tick = (now) => {
-      const p = Math.min(1, (now - start) / dur);
-      curve.getPointAt(p, group.position);
-      group.position.y += Math.sin(p * Math.PI) * 0.12;
-      ring.rotation.z += 0.18;
-      if (p < 1) {
-        requestAnimationFrame(tick);
-        return;
-      }
-      scene.remove(group);
-      core.geometry.dispose();
-      coreMat.dispose();
-      ring.geometry.dispose();
-      ringMat.dispose();
-      resolve();
-    };
-    requestAnimationFrame(tick);
-  });
+function secretaryHomePath(fromX) {
+  const d = DEPT_MAP.director;
+  return [
+    floorPoint(fromX, WORLD.corridorZ),
+    floorPoint(0, WORLD.corridorZ),
+    floorPoint(0, outerDoorZ(d)),
+    floorPoint(0, innerDoorZ(d)),
+    floorPoint(0, -8.3),
+    floorPoint(2.8, -8.3),
+    floorPoint(2.8, -12.5),
+    floorPoint(4.55, -12.5),
+    floorPoint(4.55, -11.5),
+  ];
 }
 
 async function sendSecretaryMessage(form) {
@@ -689,44 +740,125 @@ async function sendSecretaryMessage(form) {
   const text = String(data.get('text') || '').trim().slice(0, 140);
   const to = String(data.get('to') || 'all');
   if (!text) return;
+  if (state.running) {
+    showToast('Đang chạy quy trình — thử lại sau khi quy trình kết thúc', 3200);
+    return;
+  }
+  if (!world.people[SECRETARY_ID]) {
+    showToast('Thư ký không còn trong phòng Giám đốc', 3000);
+    return;
+  }
+  if (world.hasWalkers()) {
+    showToast('Đang có nhân sự di chuyển — thử lại sau giây lát', 3000);
+    return;
+  }
 
-  const targets = to === 'all'
+  const targets = (to === 'all'
     ? DEPARTMENTS.filter((d) => d.id !== 'director')
-    : DEPARTMENTS.filter((d) => d.id === to);
+    : DEPARTMENTS.filter((d) => d.id === to))
+    .slice()
+    .sort((a, b) => a.posX - b.posX);
   if (!targets.length) return;
 
   messageBusy = true;
+  const flowAtStart = state.runId;
   const btn = form.querySelector('button');
   const status = ui.card.querySelector('.msg-status');
   const label = btn ? btn.textContent : '';
+  const names = targets.map((d) => d.short).join(', ');
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Đang truyền...';
+    btn.textContent = 'Thư ký đang đi...';
   }
-  if (status) status.textContent = 'Thư ký đang chuyển thông điệp...';
+  if (status) status.textContent = `Thư ký nhận chỉ đạo và bắt đầu đi tới ${names}...`;
 
-  await Promise.all(targets.map(flyMessage));
-  for (const d of targets) notifyDept(d.id, 'Thư ký Giám đốc', text, 'director');
+  const task = {
+    id: makeId('t'),
+    text: `Đưa thông điệp tới ${names}: ${text}`.slice(0, 90),
+    done: false,
+    at: Date.now(),
+  };
+  staffTasks(SECRETARY_ID).unshift(task);
+  saveTasks(taskState);
+  addLog('director', `Giao thư ký đưa tin tới ${names}`);
 
-  addLog('director', `Thư ký chuyển thông điệp tới ${targets.map((d) => d.short).join(', ')}: ${text}`);
-  showToast(`Thư ký đã truyền thông điệp tới ${targets.length} phòng`, 3800);
+  let delivered = 0;
+  let cancelled = false;
+  try {
+    setStatus('Thư ký nhận chỉ đạo từ Giám đốc...', 'running');
+    cancelled = !(await world.walkPerson(SECRETARY_ID, secretaryStartPath(), {
+      speed: walkSpeed(), end: 'stand',
+    }));
+    let x = 0;
+    for (const d of targets) {
+      if (cancelled || state.runId !== flowAtStart) break;
+      setStatus(`Thư ký đang đi tới ${d.short}...`, 'running');
+      cancelled = !(await world.walkPerson(SECRETARY_ID, secretaryTargetPath(x, d), {
+        speed: walkSpeed(), end: 'stand',
+      }));
+      if (cancelled) break;
+      x = d.posX;
+      notifyDept(d.id, 'Thư ký Giám đốc', text, 'director');
+      addLog(d.id, `Thư ký Giám đốc đưa tin: ${text}`);
+      delivered += 1;
+      showToast(`Thư ký đã đưa thông điệp tại ${d.short}`, 2200);
+      await new Promise((r) => setTimeout(r, 340 / state.speed));
+    }
 
-  messageBusy = false;
-  if (btn && form.isConnected) {
-    btn.disabled = false;
-    btn.textContent = label;
+    if (!cancelled && state.runId === flowAtStart) {
+      setStatus('Thư ký đang quay về phòng Giám đốc...', 'running');
+      cancelled = !(await world.walkPerson(SECRETARY_ID, secretaryHomePath(x), {
+        speed: walkSpeed(), end: 'sit',
+      }));
+    }
+  } finally {
+    if (cancelled && world.people[SECRETARY_ID] && !world.people[SECRETARY_ID].walk) {
+      world.parkPerson(SECRETARY_ID);
+    }
+    const rec = staffTasks(SECRETARY_ID).find((t) => t.id === task.id);
+    if (rec) {
+      rec.done = delivered === targets.length;
+      saveTasks(taskState);
+    }
+    messageBusy = false;
+    if (!state.running) setStatus('Sẵn sàng', 'idle');
+    if (btn && form.isConnected) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+    const msgText = delivered === targets.length
+      ? `✓ Thư ký đã đưa tin tới ${names} lúc ${formatViTime(Date.now())}`
+      : delivered
+        ? `Lượt đi bị ngắt — đã đưa tin tới ${delivered}/${targets.length} phòng`
+        : 'Lượt đi bị ngắt — thông điệp chưa được giao';
+    if (delivered === targets.length) {
+      showToast(`Thư ký đã đưa tin tới ${targets.length} phòng`, 3800);
+      if (form.isConnected) form.reset();
+    }
+    if (state.selected === 'director' && state.selectedStaff === SECRETARY_ID) {
+      const m = membersOf(DEPT_MAP.director).find((x2) => x2.id === SECRETARY_ID);
+      if (m) renderStaffCard(DEPT_MAP.director, m);
+    }
+    const liveStatus = ui.card.querySelector('.msg-status');
+    if (liveStatus) liveStatus.textContent = msgText;
+    renderBoard();
   }
-  if (status && form.isConnected) {
-    const names = targets.map((d) => d.short).join(', ');
-    status.textContent = `✓ Đã gửi lúc ${formatViTime(Date.now())} tới ${names}`;
-  }
-  form.reset();
+}
+
+let dismissArm = null;
+
+function clearDismissArm() {
+  if (dismissArm) clearTimeout(dismissArm.timer);
+  dismissArm = null;
 }
 
 function renderStaffCard(d, m) {
+  clearDismissArm();
   const tasks = staffTasks(m.id);
   const openCount = tasks.filter((t) => !t.done).length;
   const hasLaw = Boolean(m.lawGroup && LAW_GROUPS[m.lawGroup]);
+  const primaryId = (d.staffList?.length ? d.staffList[0] : { id: d.id }).id;
+  const isPrimary = m.id === primaryId;
 
   ui.card.classList.remove('is-ai');
   ui.card.innerHTML = `
@@ -755,6 +887,12 @@ function renderStaffCard(d, m) {
         <input name="task" type="text" maxlength="90" placeholder="Giao việc mới..." autocomplete="off" required>
         <button type="submit">Giao</button>
       </form>
+    </div>
+    <div class="staff-danger">
+      <button class="dismiss-btn" type="button" data-dismiss="${m.id}" ${isPrimary ? 'disabled' : ''}>Cho thôi việc</button>
+      <p class="dismiss-note">${isPrimary
+        ? 'Nhân sự chính gắn với quy trình hồ sơ của phòng nên không thể cho thôi việc.'
+        : 'Xoá nhân sự khỏi phòng, bàn làm việc 3D và toàn bộ việc đã giao.'}</p>
     </div>`;
 }
 
@@ -771,7 +909,7 @@ function renderRecruitCard(d) {
         <h2>Thêm nhân sự · ${esc(d.short)}</h2>
       </div>
     </div>
-    <p class="desc">Phòng đang có ${count}/3 nhân sự. Nhân sự mới được kê thêm bàn làm việc riêng trong mô hình 3D và được lưu lại cho lần truy cập sau.</p>
+    <p class="desc">Phòng đang có ${count}/3 nhân sự. Nhân sự mới được kê thêm bàn làm việc riêng trong mô hình 3D, nhận việc và thông báo như các nhân sự khác. Phần “Phụ trách” chỉ là mô tả trên hồ sơ — nghiệp vụ chuyên biệt vẫn cần lập trình thêm.</p>
     <form class="recruit-form" data-dept="${d.id}">
       <label>Họ tên<input name="name" type="text" maxlength="40" placeholder="VD: Nguyễn Văn An" autocomplete="off" required></label>
       <label>Chức danh<input name="role" type="text" maxlength="40" placeholder="VD: Chuyên viên hồ sơ" autocomplete="off" required></label>
@@ -842,6 +980,65 @@ function hireStaff(form) {
   selectStaff(d, member.id);
 }
 
+function armDismiss(staffId) {
+  const btn = ui.card.querySelector('.dismiss-btn');
+  if (!btn || btn.disabled) return;
+  if (dismissArm && dismissArm.id === staffId) {
+    clearDismissArm();
+    dismissStaff(staffId);
+    return;
+  }
+  clearDismissArm();
+  dismissArm = {
+    id: staffId,
+    timer: setTimeout(() => {
+      dismissArm = null;
+      const b = ui.card.querySelector('.dismiss-btn');
+      if (b) {
+        b.classList.remove('is-confirm');
+        b.textContent = 'Cho thôi việc';
+      }
+    }, 4000),
+  };
+  btn.classList.add('is-confirm');
+  btn.textContent = 'Bấm lần nữa để xác nhận';
+}
+
+function dismissStaff(staffId) {
+  const d = DEPT_MAP[state.selected];
+  if (!d) return;
+  const m = membersOf(d).find((x) => x.id === staffId);
+  if (!m) return;
+  if (state.running) {
+    showToast('Đang chạy quy trình — dừng lại trước khi cho thôi việc', 3200);
+    return;
+  }
+  if (world.hasWalkers()) {
+    showToast('Nhân sự đang di chuyển — thử lại sau giây lát', 3200);
+    return;
+  }
+  const baseSecondary = (d.staffList || []).slice(1).some((x) => x.id === staffId);
+  const isExtra = (roster.extras[d.id] || []).some((x) => x.id === staffId);
+  if (!baseSecondary && !isExtra) return;
+
+  if (!world.removeStaffMember(d.id, staffId)) {
+    showToast('Không thể xoá nhân sự này khỏi mô hình', 3000);
+    return;
+  }
+  if (isExtra) roster.extras[d.id] = roster.extras[d.id].filter((x) => x.id !== staffId);
+  if (baseSecondary) {
+    dismissed[d.id] = [...new Set([...(dismissed[d.id] || []), staffId])];
+    roster.dismissed[d.id] = dismissed[d.id];
+  }
+  saveRoster(roster);
+  delete taskState[staffId];
+  saveTasks(taskState);
+  updateStaffCount();
+  addLog(d.id, `Cho ${m.name} thôi việc — ${m.role}`);
+  showToast(`Đã cho ${m.name} thôi việc · Đã xoá bàn làm việc và việc được giao`, 4600);
+  selectDept(d.id);
+}
+
 function rerenderStaff(staffId) {
   const d = DEPT_MAP[state.selected];
   if (!d) return;
@@ -883,6 +1080,7 @@ function toggleStaffTask(staffId, taskId) {
     const open = tasks.filter((x) => !x.done).length;
     count.textContent = `${open}/${tasks.length} chưa xong`;
   }
+  renderBoard();
 }
 
 function removeStaffTask(staffId, taskId) {
@@ -892,6 +1090,7 @@ function removeStaffTask(staffId, taskId) {
   tasks.splice(i, 1);
   saveTasks(taskState);
   rerenderStaff(staffId);
+  renderBoard();
 }
 
 function toggleAITask(li) {
@@ -909,6 +1108,7 @@ function toggleAITask(li) {
   btn.textContent = isDone ? '✓' : '';
   const count = aiPlan.tasks.filter((t) => doneSet.has(t.id)).length;
   ui.card.querySelector('.ai-progress').textContent = `${count}/${aiPlan.tasks.length} hoàn thành`;
+  renderBoard();
 }
 
 // ------------------------------------------------------------ daily reports
@@ -1063,6 +1263,7 @@ function focusDeptCamera(d) {
 }
 
 function selectDept(id, focus = true) {
+  clearDismissArm();
   state.selected = id;
   state.selectedStaff = null;
   hideToast();
@@ -1081,6 +1282,7 @@ function selectDept(id, focus = true) {
 }
 
 function deselect() {
+  clearDismissArm();
   state.selected = null;
   state.selectedStaff = null;
   ui.card.classList.add('hidden');
@@ -1245,9 +1447,6 @@ function resetFlowData() {
   state.carrier = null;
   state.tokenGoal = null;
   for (const id of DEPARTMENTS.map((d) => d.id)) updateStatsUI(id);
-  ui.logList.innerHTML = '';
-  state.logCount = 0;
-  ui.logCount.textContent = '0';
   hideBubble();
   clearTrails();
   resetTokenToEntry();
@@ -1266,7 +1465,6 @@ function abortFlow() {
   world.resetPeople();
   clearTrails();
   resetTokenToEntry();
-  addLog(null, 'Đã dừng quy trình theo yêu cầu');
 }
 
 async function runFlow() {
@@ -1287,7 +1485,6 @@ async function runFlow() {
   ui.rotate.classList.remove('active');
   focusCamera(defaultPos(), DEFAULT_TARGET);
   setStatus('Khởi tạo hồ sơ...', 'running');
-  addLog(null, 'Khách hàng gửi hồ sơ dự án — bắt đầu quy trình');
   await wait(520 / state.speed, runId);
   if (runId !== state.runId) return;
 
@@ -1360,6 +1557,7 @@ async function runFlow() {
 
     setDeptActive(id, true);
     state.stats[id].in += 1;
+    boardBump(id, 'in');
     updateStatsUI(id);
 
     setStatus(`${d.short} đang xử lý hồ sơ`, 'running');
@@ -1368,6 +1566,7 @@ async function runFlow() {
     if (!worked) return;
 
     state.stats[id].out += 1;
+    boardBump(id, 'out');
     updateStatsUI(id);
     setDeptActive(id, false);
     setStepState(id, 'done');
@@ -1380,7 +1579,7 @@ async function runFlow() {
   }
 
   setStatus('Hoàn tất quy trình', 'done');
-  addLog(null, 'Toàn bộ hồ sơ đã được phê duyệt và lưu tại Kế toán');
+  addLog('accounting', 'Toàn bộ hồ sơ đã được phê duyệt và lưu tại Kế toán');
   showToast('Quy trình khép kín hoàn tất · Hồ sơ đã được phê duyệt và lưu trữ', 4800);
 
   state.running = false;
@@ -1461,6 +1660,9 @@ window.addEventListener('keydown', (e) => {
 ui.card.addEventListener('click', (e) => {
   const close = e.target.closest('.close');
   if (close) { deselect(); return; }
+
+  const dismissBtn = e.target.closest('.dismiss-btn');
+  if (dismissBtn) { armDismiss(dismissBtn.dataset.dismiss); return; }
 
   const staffBtn = e.target.closest('.staff-btn');
   if (staffBtn) {
@@ -1569,8 +1771,10 @@ function start() {
   updateStaffCount();
   syncAllNotifs();
 
-  addLog(null, 'Mô hình văn phòng TTS.Co đã sẵn sàng');
-  addLog('hr', `AI Nhân sự đã xếp hạng ${aiPlan.tasks.length} việc ưu tiên hôm nay`);
+  renderBoard();
+  if (!boardDept('hr').actions.length) {
+    addLog('hr', `AI Nhân sự xếp hạng ${aiPlan.tasks.length} việc ưu tiên hôm nay`);
+  }
   setStatus('Sẵn sàng', 'idle');
 
   setTimeout(() => {

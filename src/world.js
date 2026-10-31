@@ -956,10 +956,16 @@ function addStaffPick(world, person, member, d) {
   pick.userData.deptId = d.id;
   person.group.add(pick);
   world.staffPickables.push(pick);
+  return pick;
 }
 
 function addExtraWorkstation(world, d, room, member, slot) {
   const g = room.group;
+  const station = new THREE.Group();
+  station.userData.slot = slot;
+  station.userData.memberId = member.id;
+  g.add(station);
+
   const base = d.extraSide || 1;
   const side = slot % 2 === 0 ? base : -base;
   const front = slot % 2 === 1;
@@ -967,18 +973,19 @@ function addExtraWorkstation(world, d, room, member, slot) {
   const deskZ = d.posZ + (front ? 1.55 : -1.5);
   const seatZ = d.posZ + (front ? 0.55 : -2.5);
 
-  const desk = addDesk(g, x, deskZ, 2.4, 1.35);
+  const desk = addDesk(station, x, deskZ, 2.4, 1.35);
   box(desk, 0.7, 0.03, 0.22, M.keyboard, 0, 0.795, 0.33, { cast: false });
   const mouse = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), M.keyboard);
   mouse.scale.set(0.8, 0.5, 1.2);
   mouse.position.set(0.52, 0.805, 0.33);
   desk.add(mouse);
-  room.screens.push(addMonitor(desk, 0, -0.28, {
+  station.userData.screenMat = addMonitor(desk, 0, -0.28, {
     kind: member.screen || DEPT_SCREENS[d.id] || 'dash',
     color: d.color,
-  }));
+  });
+  room.screens.push(station.userData.screenMat);
   addPaperStack(desk, side > 0 ? -0.58 : 0.62, 0.26, 2, 0.1);
-  addChair(g, x, seatZ, 0, false);
+  addChair(station, x, seatZ, 0, false);
 
   const look = member.look || HIRE_LOOKS[slot % HIRE_LOOKS.length];
   const person = createPerson({
@@ -989,7 +996,11 @@ function addExtraWorkstation(world, d, room, member, slot) {
     tie: Boolean(look.tie),
   });
   person.group.position.set(x, FLOOR_Y + SEAT_DROP, seatZ);
-  g.add(person.group);
+  station.add(person.group);
+
+  const pick = addStaffPick(world, person, member, d);
+  const tag = addStaffTag(station, member, d.color, x, seatZ);
+  station.userData.tag = tag;
 
   world.people[member.id] = {
     ...person,
@@ -1000,18 +1011,21 @@ function addExtraWorkstation(world, d, room, member, slot) {
     standing: false,
     lookYaw: null,
     yOff: SEAT_DROP,
+    pick,
   };
 
-  addStaffPick(world, person, member, d);
-  room.tags.push(addStaffTag(g, member, d.color, x, seatZ));
+  room.tags.push(tag);
+  room.stations[member.id] = station;
 }
 
-function buildRoom(scene, world, d, extras = []) {
+function buildRoom(scene, world, d, extras = [], dismissed = []) {
   const g = new THREE.Group();
   scene.add(g);
 
   const { posX, posZ } = d;
-  const baseMembers = d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
+  const baseRaw = d.staffList?.length ? d.staffList : [{ id: d.id, name: d.staff, role: d.role }];
+  const gone = new Set(dismissed);
+  const baseMembers = baseRaw.filter((m, i) => i === 0 || !gone.has(m.id));
   const room = {
     group: g,
     ring: null,
@@ -1022,6 +1036,7 @@ function buildRoom(scene, world, d, extras = []) {
     members: [],
     extraMembers: [],
     tags: [],
+    stations: {},
     mainTag: null,
     notif: null,
   };
@@ -1116,7 +1131,7 @@ function buildRoom(scene, world, d, extras = []) {
   });
   person.group.position.set(personX, FLOOR_Y + SEAT_DROP, personZ);
   g.add(person.group);
-  addStaffPick(world, person, baseMembers[0], d);
+  const mainPick = addStaffPick(world, person, baseMembers[0], d);
 
   // keyboard + mouse
   box(desk, 0.86, 0.03, 0.24, M.keyboard, 0, 0.795, 0.36, { cast: false });
@@ -1271,6 +1286,7 @@ function buildRoom(scene, world, d, extras = []) {
     standing: false,
     lookYaw: null,
     yOff: SEAT_DROP,
+    pick: mainPick,
   };
 }
 
@@ -1478,7 +1494,7 @@ function updateWalk(p, dt) {
 
 // ---------------------------------------------------------------- build
 
-export function buildWorld(scene, extras = {}) {
+export function buildWorld(scene, extras = {}, dismissed = {}) {
   initMaterials();
   const world = {
     rooms: {},
@@ -1494,21 +1510,63 @@ export function buildWorld(scene, extras = {}) {
   addLights(scene);
   plantSink = world.plants;
   addEntrance(scene, world);
-  for (const d of DEPARTMENTS) buildRoom(scene, world, d, extras[d.id] || []);
+  for (const d of DEPARTMENTS) buildRoom(scene, world, d, extras[d.id] || [], dismissed[d.id] || []);
   plantSink = null;
   addGuideLines(scene);
   addToken(scene, world);
 
   world.addStaffMember = (d, member) => {
     const room = world.rooms[d.id];
-    if (!room || room.extraMembers.length >= MAX_STAFF - 1) return false;
-    const slot = room.extraMembers.length;
-    if (slot === 0) {
+    if (!room) return false;
+    const used = new Set(Object.values(room.stations).map((s) => s.userData.slot));
+    let slot = -1;
+    for (let i = 0; i < MAX_STAFF - 1; i++) {
+      if (!used.has(i)) { slot = i; break; }
+    }
+    if (slot < 0) return false;
+    if (!room.mainTag) {
       room.mainTag = addStaffTag(room.group, room.members[0], d.color, d.posX, d.posZ - 2.5);
     }
     addExtraWorkstation(world, d, room, member, slot);
     room.extraMembers.push(member);
     room.members.push(member);
+    return true;
+  };
+
+  world.removeStaffMember = (deptId, staffId) => {
+    const room = world.rooms[deptId];
+    if (!room) return false;
+    const station = room.stations[staffId];
+    const p = world.people[staffId];
+    if (!station || !p) return false;
+
+    if (p.walk) {
+      const done = p.walk.resolve;
+      p.walk = null;
+      done(false);
+    }
+    const pi = world.staffPickables.indexOf(p.pick);
+    if (pi >= 0) world.staffPickables.splice(pi, 1);
+    const tag = station.userData.tag;
+    if (tag) {
+      const ti = room.tags.indexOf(tag);
+      if (ti >= 0) room.tags.splice(ti, 1);
+      tag.material.map?.dispose();
+      tag.material.dispose();
+    }
+    const si = room.screens.indexOf(station.userData.screenMat);
+    if (si >= 0) room.screens.splice(si, 1);
+    room.group.remove(station);
+    delete world.people[staffId];
+    delete room.stations[staffId];
+    room.members = room.members.filter((m) => m.id !== staffId);
+    room.extraMembers = room.extraMembers.filter((m) => m.id !== staffId);
+    if (!room.extraMembers.length && room.mainTag) {
+      room.group.remove(room.mainTag);
+      room.mainTag.material.map?.dispose();
+      room.mainTag.material.dispose();
+      room.mainTag = null;
+    }
     return true;
   };
 

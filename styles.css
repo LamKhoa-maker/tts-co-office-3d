@@ -230,68 +230,105 @@ html, body {
   background: var(--green);
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
 }
-.log-count {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--muted);
-  background: rgba(15, 23, 42, 0.06);
-  border-radius: 999px;
-  padding: 2px 8px;
+.board-date {
+  font-size: 10px;
+  font-weight: 600;
+  color: #8b9ab1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-/* ------------------------------------------------------------ log */
+/* ------------------------------------------------------------ daily board */
 
-.log-panel {
+.board-panel {
   position: absolute;
   top: 96px;
   right: 18px;
-  width: 292px;
-  max-height: min(44vh, 360px);
+  width: 300px;
+  max-height: min(52vh, 430px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.log-panel ul {
+.board-list {
   list-style: none;
   margin: 0;
   padding: 2px 8px 10px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
 }
-.log-panel li {
-  display: grid;
-  grid-template-columns: 8px 1fr;
-  gap: 9px;
-  padding: 8px 8px;
+.board-dept {
+  padding: 8px;
   border-radius: 10px;
-  animation: slide-in 0.35s ease both;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
-.log-panel li + li { border-top: 1px dashed rgba(15, 23, 42, 0.06); }
-.log-dot {
+.board-dept + .board-dept { border-top: 1px dashed rgba(15, 23, 42, 0.07); }
+.board-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.board-dot {
+  flex: none;
   width: 7px;
   height: 7px;
-  margin-top: 5px;
   border-radius: 50%;
+  background: var(--c);
 }
-.log-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
+.board-head strong {
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.log-top strong { font-size: 11.5px; font-weight: 700; }
-.log-top time {
-  font-size: 10px;
+.board-count {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 600;
   color: #8b9ab1;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.log-panel p {
-  margin: 2px 0 0;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--muted);
+.board-line {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #5b6b82;
+  overflow-wrap: anywhere;
 }
+.board-line b {
+  color: #334155;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.board-feed {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.board-feed li {
+  display: flex;
+  gap: 6px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: #4b5f76;
+}
+.board-feed time {
+  flex: none;
+  margin-top: 1px;
+  font-size: 9.5px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.board-feed span { overflow-wrap: anywhere; }
+.board-empty { margin: 1px 0 0; font-size: 10px; color: #9aa8ba; }
 
 /* ------------------------------------------------------------ dept card */
 
@@ -829,6 +866,40 @@ html, body {
 .recruit-form input:focus { outline: 2px solid rgba(37, 99, 235, 0.3); outline-offset: 1px; }
 .recruit-form .btn { height: 40px; justify-content: center; }
 
+/* ------------------------------------------------------------ dismiss staff */
+
+.staff-danger {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(225, 29, 72, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dismiss-btn {
+  align-self: flex-start;
+  appearance: none;
+  border: 1px solid rgba(225, 29, 72, 0.3);
+  background: rgba(225, 29, 72, 0.055);
+  color: #be123c;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.dismiss-btn:hover:not(:disabled) { background: rgba(225, 29, 72, 0.12); }
+.dismiss-btn.is-confirm { background: #be123c; border-color: #be123c; color: #fff; }
+.dismiss-btn:disabled { cursor: default; opacity: 0.42; }
+.dismiss-note {
+  margin: 0;
+  font-size: 9.5px;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
 /* ------------------------------------------------------------ HR AI */
 
 .ai-panel {
@@ -1322,11 +1393,11 @@ html, body {
 
 @media (max-width: 1180px) {
   .brand-text h1 span { display: none; }
-  .log-panel { width: 268px; }
+  .board-panel { width: 276px; }
 }
 
 @media (max-width: 980px) {
-  .log-panel { display: none; }
+  .board-panel { display: none; }
   .brand-text p { display: none; }
 }
 
