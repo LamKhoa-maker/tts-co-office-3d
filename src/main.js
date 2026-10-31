@@ -346,20 +346,20 @@ function aiCounts() {
   const approved = new Set(aiState.approved);
   const total = aiPlan.tasks.length;
   const doneCount = aiPlan.tasks.filter((t) => done.has(t.id)).length;
-  const approvedCount = aiPlan.tasks.filter((t) => approved.has(t.id) && !done.has(t.id)).length;
-  return { total, done: doneCount, approved: approvedCount, open: total - doneCount - approvedCount };
+  const approvedCount = aiPlan.tasks.filter((t) => approved.has(t.id)).length;
+  const approvedOpen = aiPlan.tasks.filter((t) => approved.has(t.id) && !done.has(t.id)).length;
+  return { total, done: doneCount, approved: approvedCount, approvedOpen, pending: total - approvedCount };
 }
 
 function pendingProposalTasks() {
   const today = dayKey();
   const approved = new Set(aiState.approved);
-  const done = new Set(aiState.done);
   const seen = new Set();
   const list = [];
   for (const r of reports.items) {
     if (dayKey(new Date(r.at)) !== today) continue;
     for (const t of r.tasks || []) {
-      if (t.done || done.has(t.id) || approved.has(t.id) || seen.has(t.id)) continue;
+      if (approved.has(t.id) || seen.has(t.id)) continue;
       seen.add(t.id);
       list.push({ ...t, reportId: r.id });
     }
@@ -372,7 +372,7 @@ function workMetrics(deptId) {
   const waiting = pendingProposalTasks().length;
   if (deptId === 'hr') {
     const ai = aiCounts();
-    return { doing: c.open + ai.approved, done: c.done + ai.done, waiting };
+    return { doing: c.open + ai.approvedOpen, done: c.done + ai.done, waiting };
   }
   return { doing: c.open, done: c.done, waiting: deptId === 'director' ? waiting : 0 };
 }
@@ -388,10 +388,15 @@ function boardHeadline(d) {
 function boardLineHTML(d) {
   if (d.id === 'hr') {
     const ai = aiCounts();
-    return `AI <b>${ai.done}/${ai.total}</b> việc xong · <b>${ai.open}</b> chờ Giám đốc duyệt`;
+    const waiting = workMetrics('hr').waiting;
+    return `AI <b>${ai.done}/${ai.total}</b> việc xong · <b>${waiting}</b> chờ Giám đốc duyệt`;
   }
   const c = deptTaskCounts(d.id);
-  if (!c.total) return d.id === 'director' ? 'Đề xuất AI đang chờ trên thẻ phòng' : 'Chưa giao việc';
+  if (!c.total) {
+    if (d.id !== 'director') return 'Chưa giao việc';
+    const waiting = workMetrics('director').waiting;
+    return waiting ? `${waiting} đề xuất chờ duyệt trên thẻ phòng` : 'Không có đề xuất chờ duyệt';
+  }
   const open = membersOf(d).flatMap((m) => staffTasks(m.id)).filter((t) => !t.done);
   return `<b>${c.done}/${c.total}</b> việc xong${open.length ? ` · đang làm: ${esc(open[0].text)}` : ''}`;
 }
@@ -498,8 +503,7 @@ function setStepState(id, s) {
 function reportResolved(report) {
   if (!report || !Array.isArray(report.tasks)) return true;
   const approved = new Set(aiState.approved);
-  const done = new Set(aiState.done);
-  return report.tasks.every((t) => t.done || approved.has(t.id) || done.has(t.id));
+  return report.tasks.every((t) => approved.has(t.id));
 }
 
 function proposalOpen(n) {
@@ -748,11 +752,12 @@ function renderHRCard(d) {
       </div>
       <p class="ai-summary">Công ty thành lập ${COMPANY.label} · đang ở tháng thứ ${plan.months + 1} · đọc ${LEGAL_SOURCES.length} văn bản · xếp hạng ${plan.tasks.length} việc theo mức khẩn cấp</p>
       <p class="ai-report"><span class="ai-report-ico">⏱</span>Báo cáo tự động <b>09:00</b> hằng ngày tới Giám đốc · <span class="ai-report-next">${reportScheduleText()}</span></p>
+      <p class="ai-hint">Đánh dấu ✓ chỉ ghi nhận tiến độ — đề xuất chỉ được xử lý khi Giám đốc bấm Duyệt.</p>
       <ol class="ai-tasks">
         ${plan.tasks.map((t) => `
           <li class="ai-task ${doneSet.has(t.id) ? 'is-done' : ''}" data-task="${t.id}">
             <span class="ai-rank" title="Thứ tự ưu tiên">${t.rank}</span>
-            <button class="ai-check" type="button" aria-pressed="${doneSet.has(t.id)}" aria-label="Đánh dấu hoàn thành">${doneSet.has(t.id) ? '✓' : ''}</button>
+            <button class="ai-check" type="button" aria-pressed="${doneSet.has(t.id)}" aria-label="Ghi nhận tiến độ" title="Ghi nhận tiến độ; Giám đốc vẫn phải duyệt">${doneSet.has(t.id) ? '✓' : ''}</button>
             <div class="ai-task-body">
               <span class="ai-pri ${t.level}">${t.priorityLabel}</span>
               ${approvedSet.has(t.id) ? '<span class="ai-approved">Giám đốc đã duyệt</span>' : ''}
@@ -767,7 +772,7 @@ function renderHRCard(d) {
           </li>`).join('')}
       </ol>
       <div class="ai-foot">
-        <span class="ai-progress">${doneCount}/${plan.tasks.length} hoàn thành${approvedCount ? ` · ${approvedCount} đã duyệt` : ''}</span>
+        <span class="ai-progress">${doneCount}/${plan.tasks.length} hoàn thành · ${approvedCount === plan.tasks.length ? 'đã duyệt đủ' : `${plan.tasks.length - approvedCount} chờ duyệt`}</span>
         <button class="ai-send" type="button">Gửi báo cáo ngay</button>
       </div>
       <details class="ai-sources">
@@ -1233,7 +1238,8 @@ function toggleAITask(li) {
   btn.textContent = isDone ? '✓' : '';
   const count = aiPlan.tasks.filter((t) => doneSet.has(t.id)).length;
   const approved = aiPlan.tasks.filter((t) => aiState.approved.includes(t.id)).length;
-  ui.card.querySelector('.ai-progress').textContent = `${count}/${aiPlan.tasks.length} hoàn thành${approved ? ` · ${approved} đã duyệt` : ''}`;
+  const total = aiPlan.tasks.length;
+  ui.card.querySelector('.ai-progress').textContent = `${count}/${total} hoàn thành · ${approved === total ? 'đã duyệt đủ' : `${total - approved} chờ duyệt`}`;
   renderBoard();
 }
 
@@ -1335,11 +1341,8 @@ function approveProposal(reportId, taskId = null) {
   const report = reports.items.find((r) => r.id === reportId);
   if (!report) return;
   const approved = new Set(aiState.approved);
-  const done = new Set(aiState.done);
   const picked = report.tasks.filter((t) => (
     (!taskId || t.id === taskId)
-    && !t.done
-    && !done.has(t.id)
     && !approved.has(t.id)
   ));
   if (!picked.length) return;
@@ -1390,9 +1393,9 @@ function appendDirectorInbox() {
       : formatViTime(r.at);
     const isDone = (t) => (isToday ? (t.done || doneSet.has(t.id)) : t.done);
     const isApproved = (t) => isToday && approvedSet.has(t.id);
-    const pending = r.tasks.filter((t) => !isDone(t) && !isApproved(t));
+    const pending = isToday ? r.tasks.filter((t) => !approvedSet.has(t.id)) : [];
     const doneCount = r.tasks.filter(isDone).length;
-    const approvedCount = r.tasks.filter((t) => isApproved(t) && !isDone(t)).length;
+    const approvedCount = r.tasks.filter(isApproved).length;
     return `<div class="inbox-head">
         <span class="tag" style="color:#0d9488">${r.auto ? 'Đề xuất 09:00' : 'Đề xuất tức thời'}</span>
         <span class="inbox-time">${timeLabel}${isToday ? '' : ` · ${formatViDate(new Date(r.at))}`}</span>
@@ -1401,11 +1404,14 @@ function appendDirectorInbox() {
         ${r.tasks.map((t) => {
           const done = isDone(t);
           const approved = isApproved(t);
-          let state = '<span class="inbox-state is-pending">Chờ xử lý</span>';
-          if (done) state = '<span class="inbox-state is-done">Đã xong</span>';
-          else if (approved) state = '<span class="inbox-state is-approved">Đã duyệt</span>';
-          else if (isToday) state = '<button class="inbox-approve" type="button" data-report="' + r.id + '" data-task="' + t.id + '">Duyệt</button><span class="inbox-state is-pending">Chờ duyệt</span>';
-          return `<li class="${done ? 'is-done' : ''}" data-task="${t.id}">
+          const struck = isToday ? approved : done;
+          let state;
+          if (approved) state = '<span class="inbox-state is-approved">Đã duyệt</span>';
+          else if (isToday) state = `<button class="inbox-approve" type="button" data-report="${r.id}" data-task="${t.id}">Duyệt</button><span class="inbox-state is-pending">${done ? 'Đã xong · chờ duyệt' : 'Chờ duyệt'}</span>`;
+          else state = done
+            ? '<span class="inbox-state is-done">Đã xong</span>'
+            : '<span class="inbox-state is-pending">Chờ xử lý</span>';
+          return `<li class="${struck ? 'is-done' : ''}" data-task="${t.id}">
             <span class="inbox-rank" data-level="${t.level}">${t.rank}</span>
             <span>${esc(t.title)}</span>
             ${state}
@@ -1447,12 +1453,12 @@ function liveOps(now = new Date()) {
     staffTotal: staffTotal(),
     pendingApprovals: pendingList.length,
     pendingList,
-    tasksOpen: staffOpen + ai.approved,
+    tasksOpen: staffOpen + ai.approvedOpen,
     tasksDone: staffDone + ai.done,
     tasksByDept,
     deptRows,
     ai,
-    hr: { open: ai.open, done: ai.done, total: ai.total },
+    hr: { open: ai.pending, done: ai.done, total: ai.total },
     lastReportAt: latest && dayKey(new Date(latest.at)) === dayKey(now) ? latest.at : null,
   };
 }

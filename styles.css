@@ -1623,6 +1623,16 @@ html, body {
   line-height: 1.4;
 }
 .ai-sources b { color: #334155; }
+.ai-hint {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 8px;
+}
 .ai-note {
   margin: 9px 0 0;
   font-size: 9.5px;

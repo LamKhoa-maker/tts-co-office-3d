@@ -138,7 +138,7 @@ export const PLAYBOOK = {
 export const OPERATING_CADENCE = [
   { when: 'Hằng ngày · 09:00', owner: 'AI Nhân sự → Giám đốc', text: 'Đề xuất ưu tiên, duyệt việc và cập nhật bảng tin phòng ban.' },
   { when: 'Thứ 2 hằng tuần', owner: 'Kinh doanh · Kế toán', text: 'Báo cáo pipeline, hợp đồng mới và công nợ phải thu.' },
-  { when: 'Ngày 5 hằng tháng', owner: 'Kế toán · Nhân sự', text: 'Thuế, BHXH, lương và KPI 5 phòng.' },
+  { when: '09:00 ngày cuối tháng', owner: 'Kế toán · Nhân sự', text: 'Thuế, BHXH, lương và KPI 5 phòng.' },
   { when: 'Hằng quý', owner: 'Nhân sự – Pháp chế', text: 'Rà soát chứng chỉ hành nghề, hồ sơ năng lực và nhà cung cấp.' },
 ];
 
