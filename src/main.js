@@ -367,6 +367,16 @@ function pendingProposalTasks() {
   return list;
 }
 
+function proposedTodayTaskIds() {
+  const today = dayKey();
+  const ids = new Set();
+  for (const r of reports.items) {
+    if (dayKey(new Date(r.at)) !== today) continue;
+    for (const t of r.tasks || []) ids.add(t.id);
+  }
+  return ids;
+}
+
 function workMetrics(deptId) {
   const c = deptTaskCounts(deptId);
   const waiting = pendingProposalTasks().length;
@@ -514,8 +524,7 @@ function proposalOpen(n) {
 }
 
 function unreadCount(deptId) {
-  return notifications.reduce((n, x) => {
-    if (x.deptId !== deptId) return n;
+  return visibleNotifs(deptId).reduce((n, x) => {
     if (!x.read) return n + 1;
     return n + (proposalOpen(x) ? 1 : 0);
   }, 0);
@@ -523,6 +532,25 @@ function unreadCount(deptId) {
 
 function deptNotifs(deptId) {
   return notifications.filter((n) => n.deptId === deptId);
+}
+
+function notifProposalTaskIds(n) {
+  const report = n.kind === 'proposal' ? reports.items.find((r) => r.id === n.reportId) : null;
+  return report && Array.isArray(report.tasks) ? report.tasks.map((t) => t.id) : [];
+}
+
+function visibleNotifs(deptId) {
+  const seen = new Set();
+  const out = [];
+  for (const n of deptNotifs(deptId)) {
+    if (n.kind === 'proposal') {
+      const ids = notifProposalTaskIds(n);
+      if (ids.length && ids.every((id) => seen.has(id))) continue;
+      for (const id of ids) seen.add(id);
+    }
+    out.push(n);
+  }
+  return out;
 }
 
 function notifyDept(deptId, from, text, fromDept = null, extra = null) {
@@ -563,7 +591,7 @@ function syncAllNotifs() {
 }
 
 function notifPanelHTML(d) {
-  const items = deptNotifs(d.id).slice(0, 5);
+  const items = visibleNotifs(d.id).slice(0, 5);
   if (!items.length) return '';
   const pending = items.filter(proposalOpen).length;
   const unread = items.filter((n) => !n.read && !proposalOpen(n)).length;
@@ -624,6 +652,23 @@ function settleProposalNotices() {
     changed = true;
   }
   if (!changed) return;
+  saveNotifications(notifications);
+  syncNotifUI('director');
+}
+
+function remindDirector(text, from = 'AI Nhân sự') {
+  const today = dayKey();
+  const existing = notifications.find((n) => (
+    n.deptId === 'director' && n.kind === 'reminder' && dayKey(new Date(n.at)) === today
+  ));
+  if (!existing) {
+    notifyDept('director', from, text, 'hr', { kind: 'reminder' });
+    return;
+  }
+  existing.from = from;
+  existing.text = String(text).slice(0, 160);
+  existing.at = Date.now();
+  existing.read = false;
   saveNotifications(notifications);
   syncNotifUI('director');
 }
@@ -773,7 +818,7 @@ function renderHRCard(d) {
       </ol>
       <div class="ai-foot">
         <span class="ai-progress">${doneCount}/${plan.tasks.length} hoàn thành · ${approvedCount === plan.tasks.length ? 'đã duyệt đủ' : `${plan.tasks.length - approvedCount} chờ duyệt`}</span>
-        <button class="ai-send" type="button">Gửi báo cáo ngay</button>
+        <button class="ai-send" type="button">${sentToday() ? 'Nhắc lại Giám đốc' : 'Gửi báo cáo ngay'}</button>
       </div>
       <details class="ai-sources">
         <summary>Nguồn AI đã đọc (${LEGAL_SOURCES.length})</summary>
@@ -1265,18 +1310,30 @@ function refreshReportSchedule() {
   if (el) el.textContent = reportScheduleText();
 }
 
-function buildReport({ auto = false, late = 0 } = {}) {
+function sentToday() {
+  const key = dayKey();
+  return reports.items.some((r) => dayKey(new Date(r.at)) === key);
+}
+
+function refreshSendButton() {
+  const btn = ui.card.querySelector('.ai-send');
+  if (btn) btn.textContent = sentToday() ? 'Nhắc lại Giám đốc' : 'Gửi báo cáo ngay';
+}
+
+function buildReport({ auto = false, late = 0, tasks = null, reminders = 0 } = {}) {
   const plan = syncAI();
   const doneSet = new Set(aiState.done);
+  const picked = tasks || plan.tasks;
   return {
     id: makeId('r'),
     at: Date.now(),
     auto,
     late,
+    reminders,
     staff: staffTotal(),
     docs: docsProcessedToday(),
-    total: plan.tasks.length,
-    tasks: plan.tasks.map((t) => ({
+    total: picked.length,
+    tasks: picked.map((t) => ({
       id: t.id,
       title: t.title,
       level: t.level,
@@ -1288,7 +1345,25 @@ function buildReport({ auto = false, late = 0 } = {}) {
 }
 
 function sendDirectorReport({ auto = false, late = 0 } = {}) {
-  const report = buildReport({ auto, late });
+  const plan = syncAI();
+  const proposedToday = proposedTodayTaskIds();
+  const fresh = plan.tasks.filter((t) => !proposedToday.has(t.id));
+  const repeats = plan.tasks.filter((t) => proposedToday.has(t.id));
+  const stamp = auto ? '09:00 · ' : '';
+
+  if (!fresh.length) {
+    const waiting = pendingProposalTasks().length;
+    const text = waiting
+      ? `Nhắc việc: ${waiting} đề xuất hôm nay đang chờ Giám đốc duyệt`
+      : `Nhắc việc: ${repeats.length} việc hôm nay đã được Giám đốc duyệt`;
+    remindDirector(text, auto ? 'AI Nhân sự · 09:00' : 'AI Nhân sự');
+    addLog('hr', `${stamp}AI Nhân sự nhắc lại ${repeats.length} việc, không tạo đề xuất trùng`);
+    addLog('director', `Nhắc việc: ${repeats.length} đề xuất đã có trong danh sách hôm nay`);
+    refreshSendButton();
+    return { reminder: true, count: repeats.length, waiting, total: plan.tasks.length };
+  }
+
+  const report = buildReport({ auto, late, tasks: fresh, reminders: repeats.length });
   reports.items.unshift(report);
   reports.items = reports.items.slice(0, 12);
   saveReports(reports);
@@ -1296,16 +1371,18 @@ function sendDirectorReport({ auto = false, late = 0 } = {}) {
   aiState.sentAt = report.at;
   saveAIState(aiState);
 
-  const lead = report.tasks[0] ? `ưu tiên 1: ${report.tasks[0].title}` : 'chưa có việc';
-  notifyDept('director', auto ? 'AI Nhân sự · 09:00' : 'AI Nhân sự', `Đề xuất ${report.total} việc chờ Giám đốc duyệt — ${lead}`, 'hr', {
+  const lead = fresh[0] ? `ưu tiên 1: ${fresh[0].title}` : 'chưa có việc';
+  notifyDept('director', auto ? 'AI Nhân sự · 09:00' : 'AI Nhân sự', `Đề xuất ${fresh.length} việc chờ Giám đốc duyệt — ${lead}`, 'hr', {
     kind: 'proposal',
     reportId: report.id,
   });
-  addLog('hr', `${auto ? '09:00 · ' : ''}AI Nhân sự gửi báo cáo ${report.total} việc tới Giám đốc`);
+  addLog('hr', `${stamp}AI Nhân sự gửi báo cáo ${fresh.length} việc tới Giám đốc`);
+  if (repeats.length) addLog('hr', `Giữ ${repeats.length} việc đã đề xuất hôm nay làm nhắc việc`);
   void walkProposalToDirector(report);
 
   if (state.selected === 'director' && !state.selectedStaff) renderCard(DEPT_MAP.director);
   if (state.selected === 'hr' && !state.selectedStaff) refreshReportSchedule();
+  refreshSendButton();
 
   return report;
 }
@@ -1348,7 +1425,16 @@ async function walkProposalToDirector(report) {
 }
 
 function sendHRProposal() {
-  sendDirectorReport();
+  const res = sendDirectorReport();
+  if (res?.reminder) {
+    showToast(
+      res.waiting
+        ? `Đã nhắc việc · ${res.waiting} đề xuất hôm nay đang chờ duyệt, không tạo trùng`
+        : `Đã nhắc việc · ${res.count} việc hôm nay đã được duyệt, không tạo trùng`,
+      4200
+    );
+    return;
+  }
   showToast('Đã gửi báo cáo tới Giám đốc · Bấm phòng Giám đốc để xem', 4200);
 }
 
@@ -1363,6 +1449,15 @@ function autoReportTick() {
   const late = Math.round((now - nine) / 60000);
   const report = sendDirectorReport({ auto: true, late });
   saveReports(reports);
+  if (report?.reminder) {
+    showToast(
+      report.waiting
+        ? `09:00 · AI Nhân sự nhắc lại ${report.waiting} đề xuất đang chờ duyệt`
+        : `09:00 · ${report.count} việc hôm nay đã được duyệt, không tạo đề xuất trùng`,
+      5200
+    );
+    return;
+  }
   showToast(
     late > 5
       ? `AI Nhân sự đã gửi báo cáo 09:00 (bù lúc ${formatViTime(report.at)}) tới Giám đốc`
@@ -1401,8 +1496,7 @@ function appendDirectorInbox() {
   const today = dayKey();
   const doneSet = new Set(aiState.done);
   const approvedSet = new Set(aiState.approved);
-  const pendingCount = reports.items
-    .filter((r) => dayKey(new Date(r.at)) === today && !reportResolved(r)).length;
+  const pendingCount = pendingProposalTasks().length;
   const box = document.createElement('div');
   box.className = 'inbox';
   box.innerHTML = `
@@ -1420,22 +1514,37 @@ function appendDirectorInbox() {
     return;
   }
 
+  const shownIds = new Set();
   const html = list.map((r) => {
     const isToday = dayKey(new Date(r.at)) === today;
     const timeLabel = r.auto
       ? `09:00${r.late > 5 ? ` · gửi bù ${formatViTime(r.at)}` : ''}`
       : formatViTime(r.at);
+    const dated = `${timeLabel}${isToday ? '' : ` · ${formatViDate(new Date(r.at))}`}`;
+    const all = Array.isArray(r.tasks) ? r.tasks : [];
+    const tasks = all.filter((t) => !shownIds.has(t.id));
+    const repeats = all.length - tasks.length;
+    for (const t of tasks) shownIds.add(t.id);
+
+    if (!tasks.length) {
+      return `<div class="inbox-head">
+        <span class="tag" style="color:#64748b">Nhắc việc</span>
+        <span class="inbox-time">${dated}</span>
+      </div>
+      <p class="inbox-note">Nhắc lại ${all.length} việc đã nêu trong đề xuất mới hơn — không lặp lại trong danh sách.</p>`;
+    }
+
     const isDone = (t) => (isToday ? (t.done || doneSet.has(t.id)) : t.done);
     const isApproved = (t) => isToday && approvedSet.has(t.id);
-    const pending = isToday ? r.tasks.filter((t) => !approvedSet.has(t.id)) : [];
-    const doneCount = r.tasks.filter(isDone).length;
-    const approvedCount = r.tasks.filter(isApproved).length;
+    const pending = isToday ? tasks.filter((t) => !approvedSet.has(t.id)) : [];
+    const doneCount = tasks.filter(isDone).length;
+    const approvedCount = tasks.filter(isApproved).length;
     return `<div class="inbox-head">
         <span class="tag" style="color:#0d9488">${r.auto ? 'Đề xuất 09:00' : 'Đề xuất tức thời'}</span>
-        <span class="inbox-time">${timeLabel}${isToday ? '' : ` · ${formatViDate(new Date(r.at))}`}</span>
+        <span class="inbox-time">${dated}</span>
       </div>
       <ol class="inbox-list">
-        ${r.tasks.map((t) => {
+        ${tasks.map((t) => {
           const done = isDone(t);
           const approved = isApproved(t);
           const struck = isToday ? approved : done;
@@ -1452,7 +1561,7 @@ function appendDirectorInbox() {
           </li>`;
         }).join('')}
       </ol>
-      <p class="inbox-note">${r.staff} nhân sự · ${r.docs} hồ sơ hôm nay · ${doneCount}/${r.total} việc AI đã xong${approvedCount ? ` · ${approvedCount} việc đã duyệt` : ''}</p>
+      <p class="inbox-note">${r.staff} nhân sự · ${r.docs} hồ sơ hôm nay · ${doneCount}/${tasks.length} việc AI đã xong${approvedCount ? ` · ${approvedCount} việc đã duyệt` : ''}${repeats ? ` · nhắc lại ${repeats} việc trùng` : ''}</p>
       ${isToday && pending.length ? `<div class="inbox-actions">
         <button class="inbox-approve-all" type="button" data-report="${r.id}">Duyệt tất cả (${pending.length})</button>
         <span>Đọc thông báo không làm mất đề xuất — chỉ khi duyệt thì đề xuất mới được xử lý.</span>
