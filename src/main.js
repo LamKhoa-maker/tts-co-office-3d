@@ -418,15 +418,33 @@ function setStepState(id, s) {
 
 // ------------------------------------------------------------ notifications
 
+function reportResolved(report) {
+  if (!report || !Array.isArray(report.tasks)) return true;
+  const approved = new Set(aiState.approved);
+  const done = new Set(aiState.done);
+  return report.tasks.every((t) => t.done || approved.has(t.id) || done.has(t.id));
+}
+
+function proposalOpen(n) {
+  if (n.kind !== 'proposal') return false;
+  const report = reports.items.find((r) => r.id === n.reportId);
+  if (!report) return false;
+  return dayKey(new Date(report.at)) === dayKey() && !reportResolved(report);
+}
+
 function unreadCount(deptId) {
-  return notifications.reduce((n, x) => n + (x.deptId === deptId && !x.read ? 1 : 0), 0);
+  return notifications.reduce((n, x) => {
+    if (x.deptId !== deptId) return n;
+    if (!x.read) return n + 1;
+    return n + (proposalOpen(x) ? 1 : 0);
+  }, 0);
 }
 
 function deptNotifs(deptId) {
   return notifications.filter((n) => n.deptId === deptId);
 }
 
-function notifyDept(deptId, from, text, fromDept = null) {
+function notifyDept(deptId, from, text, fromDept = null, extra = null) {
   if (!DEPT_MAP[deptId]) return;
   notifications.unshift({
     id: makeId('n'),
@@ -436,6 +454,7 @@ function notifyDept(deptId, from, text, fromDept = null) {
     text: String(text).slice(0, 160),
     at: Date.now(),
     read: false,
+    ...(extra && typeof extra === 'object' ? extra : {}),
   });
   saveNotifications(notifications);
   syncNotifUI(deptId);
@@ -465,19 +484,29 @@ function syncAllNotifs() {
 function notifPanelHTML(d) {
   const items = deptNotifs(d.id).slice(0, 5);
   if (!items.length) return '';
-  const unread = items.filter((n) => !n.read).length;
+  const pending = items.filter(proposalOpen).length;
+  const unread = items.filter((n) => !n.read && !proposalOpen(n)).length;
+  const status = [
+    pending ? `${pending} chờ duyệt` : '',
+    unread ? `${unread} tin mới` : '',
+  ].filter(Boolean).join(' · ') || `${items.length} tin`;
   return `<div class="notif-panel">
     <div class="notif-head">
       <h3><span class="notif-bell">🔔</span>Thông báo tại phòng</h3>
-      <span>${unread ? `${unread} tin mới` : `${items.length} tin`}</span>
+      <span>${status}</span>
     </div>
     <ul class="notif-list">
       ${items.map((n) => {
         const src = n.fromDept ? DEPT_MAP[n.fromDept] : null;
-        return `<li class="${n.read ? '' : 'is-new'}">
+        const open = proposalOpen(n);
+        return `<li class="${n.read && !open ? '' : 'is-new'}${open ? ' is-pending' : ''}">
           <span class="notif-dot" style="background:${src ? src.color : '#e11d48'}"></span>
           <div class="notif-body">
-            <div class="notif-meta"><strong>${esc(n.from)}</strong><time>${formatViTime(n.at)}</time></div>
+            <div class="notif-meta">
+              <strong>${esc(n.from)}</strong>
+              <time>${formatViTime(n.at)}</time>
+              ${open ? '<span class="notif-flag">Chờ duyệt</span>' : ''}
+            </div>
             <p>${esc(n.text)}</p>
           </div>
         </li>`;
@@ -496,14 +525,26 @@ function refreshNotifPanel(deptId) {
 function markDeptNotifsRead(deptId) {
   let changed = false;
   for (const n of notifications) {
-    if (n.deptId === deptId && !n.read) {
-      n.read = true;
-      changed = true;
-    }
+    if (n.deptId !== deptId || n.read) continue;
+    if (proposalOpen(n)) continue;
+    n.read = true;
+    changed = true;
   }
   if (!changed) return;
   saveNotifications(notifications);
   syncNotifUI(deptId);
+}
+
+function settleProposalNotices() {
+  let changed = false;
+  for (const n of notifications) {
+    if (n.kind !== 'proposal' || n.read || proposalOpen(n)) continue;
+    n.read = true;
+    changed = true;
+  }
+  if (!changed) return;
+  saveNotifications(notifications);
+  syncNotifUI('director');
 }
 
 
@@ -603,7 +644,9 @@ function renderCard(d) {
 function renderHRCard(d) {
   const plan = syncAI();
   const doneSet = new Set(aiState.done);
+  const approvedSet = new Set(aiState.approved);
   const doneCount = plan.tasks.filter((t) => doneSet.has(t.id)).length;
+  const approvedCount = plan.tasks.filter((t) => approvedSet.has(t.id)).length;
 
   ui.card.classList.add('is-ai');
   ui.card.innerHTML = `
@@ -632,6 +675,7 @@ function renderHRCard(d) {
             <button class="ai-check" type="button" aria-pressed="${doneSet.has(t.id)}" aria-label="Đánh dấu hoàn thành">${doneSet.has(t.id) ? '✓' : ''}</button>
             <div class="ai-task-body">
               <span class="ai-pri ${t.level}">${t.priorityLabel}</span>
+              ${approvedSet.has(t.id) ? '<span class="ai-approved">Giám đốc đã duyệt</span>' : ''}
               <h3>${t.title}</h3>
               <p>${t.detail}</p>
               <div class="ai-meta">
@@ -643,7 +687,7 @@ function renderHRCard(d) {
           </li>`).join('')}
       </ol>
       <div class="ai-foot">
-        <span class="ai-progress">${doneCount}/${plan.tasks.length} hoàn thành</span>
+        <span class="ai-progress">${doneCount}/${plan.tasks.length} hoàn thành${approvedCount ? ` · ${approvedCount} đã duyệt` : ''}</span>
         <button class="ai-send" type="button">Gửi báo cáo ngay</button>
       </div>
       <details class="ai-sources">
@@ -1100,6 +1144,7 @@ function toggleAITask(li) {
   else doneSet.add(id);
   aiState.done = [...doneSet];
   saveAIState(aiState);
+  settleProposalNotices();
 
   const isDone = doneSet.has(id);
   li.classList.toggle('is-done', isDone);
@@ -1107,7 +1152,8 @@ function toggleAITask(li) {
   btn.setAttribute('aria-pressed', String(isDone));
   btn.textContent = isDone ? '✓' : '';
   const count = aiPlan.tasks.filter((t) => doneSet.has(t.id)).length;
-  ui.card.querySelector('.ai-progress').textContent = `${count}/${aiPlan.tasks.length} hoàn thành`;
+  const approved = aiPlan.tasks.filter((t) => aiState.approved.includes(t.id)).length;
+  ui.card.querySelector('.ai-progress').textContent = `${count}/${aiPlan.tasks.length} hoàn thành${approved ? ` · ${approved} đã duyệt` : ''}`;
   renderBoard();
 }
 
@@ -1169,7 +1215,10 @@ function sendDirectorReport({ auto = false, late = 0 } = {}) {
   saveAIState(aiState);
 
   const lead = report.tasks[0] ? `ưu tiên 1: ${report.tasks[0].title}` : 'chưa có việc';
-  notifyDept('director', auto ? 'AI Nhân sự · 09:00' : 'AI Nhân sự', `Báo cáo ${report.total} việc — ${lead}`, 'hr');
+  notifyDept('director', auto ? 'AI Nhân sự · 09:00' : 'AI Nhân sự', `Đề xuất ${report.total} việc chờ Giám đốc duyệt — ${lead}`, 'hr', {
+    kind: 'proposal',
+    reportId: report.id,
+  });
   addLog('hr', `${auto ? '09:00 · ' : ''}AI Nhân sự gửi báo cáo ${report.total} việc tới Giám đốc`);
 
   if (state.selected === 'director' && !state.selectedStaff) renderCard(DEPT_MAP.director);
@@ -1202,22 +1251,54 @@ function autoReportTick() {
   );
 }
 
+function approveProposal(reportId, taskId = null) {
+  const report = reports.items.find((r) => r.id === reportId);
+  if (!report) return;
+  const approved = new Set(aiState.approved);
+  const done = new Set(aiState.done);
+  const picked = report.tasks.filter((t) => (
+    (!taskId || t.id === taskId)
+    && !t.done
+    && !done.has(t.id)
+    && !approved.has(t.id)
+  ));
+  if (!picked.length) return;
+  for (const t of picked) approved.add(t.id);
+  aiState.approved = [...approved];
+  saveAIState(aiState);
+  settleProposalNotices();
+
+  const label = picked.length === 1 ? `đề xuất: ${picked[0].title}` : `${picked.length} đề xuất AI Nhân sự`;
+  addLog('director', `Giám đốc duyệt ${label}`);
+  notifyDept('hr', 'Giám đốc', `Đã duyệt ${label}`, 'director');
+  showToast(`Đã duyệt ${label}`, 3200);
+
+  if (state.selected === 'director' && !state.selectedStaff) {
+    const top = ui.card.scrollTop;
+    renderCard(DEPT_MAP.director);
+    ui.card.scrollTop = top;
+  }
+}
+
 function appendDirectorInbox() {
   const today = dayKey();
   const doneSet = new Set(aiState.done);
+  const approvedSet = new Set(aiState.approved);
+  const pendingCount = reports.items
+    .filter((r) => dayKey(new Date(r.at)) === today && !reportResolved(r)).length;
   const box = document.createElement('div');
   box.className = 'inbox';
   box.innerHTML = `
-    <div class="live-strip"><span class="live-dot"></span>Báo cáo thời gian thực · ${staffTotal()} nhân sự · ${docsProcessedToday()} hồ sơ hôm nay · ${notifications.filter((n) => !n.read).length} thông báo mới</div>`;
+    <div class="live-strip"><span class="live-dot"></span>Báo cáo thời gian thực · ${staffTotal()} nhân sự · ${docsProcessedToday()} hồ sơ hôm nay · ${pendingCount} đề xuất chờ duyệt</div>`;
 
   const list = reports.items.slice(0, 2);
   if (!list.length) {
     box.insertAdjacentHTML('beforeend', `
       <div class="inbox-head">
-        <span class="tag" style="color:#0d9488">Báo cáo từ Nhân sự</span>
+        <span class="tag" style="color:#0d9488">Đề xuất từ Nhân sự</span>
         <span class="inbox-time">09:00 hằng ngày</span>
       </div>
-      <p class="inbox-note">Chưa có báo cáo. AI Nhân sự sẽ gửi lúc 09:00.</p>`);
+      <p class="inbox-note">Chưa có đề xuất. AI Nhân sự sẽ gửi lúc 09:00.</p>`);
     ui.card.appendChild(box);
     return;
   }
@@ -1227,21 +1308,35 @@ function appendDirectorInbox() {
     const timeLabel = r.auto
       ? `09:00${r.late > 5 ? ` · gửi bù ${formatViTime(r.at)}` : ''}`
       : formatViTime(r.at);
-    const doneNow = (t) => (isToday ? doneSet.has(t.id) : t.done);
-    const doneCount = r.tasks.filter(doneNow).length;
+    const isDone = (t) => (isToday ? (t.done || doneSet.has(t.id)) : t.done);
+    const isApproved = (t) => isToday && approvedSet.has(t.id);
+    const pending = r.tasks.filter((t) => !isDone(t) && !isApproved(t));
+    const doneCount = r.tasks.filter(isDone).length;
+    const approvedCount = r.tasks.filter((t) => isApproved(t) && !isDone(t)).length;
     return `<div class="inbox-head">
-        <span class="tag" style="color:#0d9488">${r.auto ? 'Báo cáo 09:00' : 'Báo cáo tức thời'}</span>
+        <span class="tag" style="color:#0d9488">${r.auto ? 'Đề xuất 09:00' : 'Đề xuất tức thời'}</span>
         <span class="inbox-time">${timeLabel}${isToday ? '' : ` · ${formatViDate(new Date(r.at))}`}</span>
       </div>
       <ol class="inbox-list">
-        ${r.tasks.map((t) => `
-          <li class="${doneNow(t) ? 'is-done' : ''}">
+        ${r.tasks.map((t) => {
+          const done = isDone(t);
+          const approved = isApproved(t);
+          let state = '<span class="inbox-state is-pending">Chờ xử lý</span>';
+          if (done) state = '<span class="inbox-state is-done">Đã xong</span>';
+          else if (approved) state = '<span class="inbox-state is-approved">Đã duyệt</span>';
+          else if (isToday) state = '<button class="inbox-approve" type="button" data-report="' + r.id + '" data-task="' + t.id + '">Duyệt</button><span class="inbox-state is-pending">Chờ duyệt</span>';
+          return `<li class="${done ? 'is-done' : ''}" data-task="${t.id}">
             <span class="inbox-rank" data-level="${t.level}">${t.rank}</span>
             <span>${esc(t.title)}</span>
-            <span class="inbox-state">${doneNow(t) ? 'Đã xong' : 'Chờ xử lý'}</span>
-          </li>`).join('')}
+            ${state}
+          </li>`;
+        }).join('')}
       </ol>
-      <p class="inbox-note">${r.staff} nhân sự · ${r.docs} hồ sơ hôm nay · ${doneCount}/${r.total} việc AI đã xong</p>`;
+      <p class="inbox-note">${r.staff} nhân sự · ${r.docs} hồ sơ hôm nay · ${doneCount}/${r.total} việc AI đã xong${approvedCount ? ` · ${approvedCount} việc đã duyệt` : ''}</p>
+      ${isToday && pending.length ? `<div class="inbox-actions">
+        <button class="inbox-approve-all" type="button" data-report="${r.id}">Duyệt tất cả (${pending.length})</button>
+        <span>Đọc thông báo không làm mất đề xuất — chỉ khi duyệt thì đề xuất mới được xử lý.</span>
+      </div>` : ''}`;
   }).join('');
   box.insertAdjacentHTML('beforeend', html);
   ui.card.appendChild(box);
@@ -1682,6 +1777,12 @@ ui.card.addEventListener('click', (e) => {
 
   const del = e.target.closest('.task-del');
   if (del) { removeStaffTask(del.dataset.staff, del.dataset.taskId); return; }
+
+  const approveOne = e.target.closest('.inbox-approve');
+  if (approveOne) { approveProposal(approveOne.dataset.report, approveOne.dataset.task); return; }
+
+  const approveAll = e.target.closest('.inbox-approve-all');
+  if (approveAll) { approveProposal(approveAll.dataset.report); return; }
 
   const aiCheck = e.target.closest('.ai-check');
   if (aiCheck) { toggleAITask(aiCheck.closest('.ai-task')); return; }

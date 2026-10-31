@@ -623,8 +623,20 @@ html, body {
   justify-content: space-between;
   gap: 8px;
 }
-.notif-meta strong { font-size: 10.5px; color: #334155; }
+.notif-meta strong { font-size: 10.5px; color: #334155; margin-right: auto; }
 .notif-meta time { font-size: 9.5px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+.notif-flag {
+  flex: none;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.16);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+.notif-list li.is-pending .notif-body p { color: #92400e; font-weight: 600; }
 .notif-body { flex: 1; min-width: 0; }
 .notif-body p { margin: 1px 0 0; overflow-wrap: anywhere; }
 
@@ -1047,6 +1059,17 @@ html, body {
 .ai-pri.urgent { color: #fff; background: #e11d48; }
 .ai-pri.medium { color: #b45309; background: rgba(245, 158, 11, 0.13); }
 .ai-pri.low { color: #0f766e; background: rgba(13, 148, 136, 0.1); }
+.ai-approved {
+  margin-left: 5px;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.1);
+  border-radius: 999px;
+  padding: 2px 6px;
+}
 .ai-foot {
   display: flex;
   align-items: center;
@@ -1129,6 +1152,7 @@ html, body {
   line-height: 1.4;
   color: #334155;
 }
+.inbox-list li > span:nth-child(2) { flex: 1; min-width: 0; }
 .inbox-dot {
   flex: none;
   width: 7px;
@@ -1142,6 +1166,47 @@ html, body {
   font-size: 9.5px;
   color: #0f766e;
 }
+.inbox-state.is-done { color: #0f766e; }
+.inbox-state.is-approved { color: #1d4ed8; }
+.inbox-state.is-pending { color: #b45309; }
+.inbox-approve {
+  flex: none;
+  margin-left: auto;
+  min-height: 22px;
+  border: 1px solid rgba(13, 148, 136, 0.35);
+  background: #fff;
+  color: #0f766e;
+  font: inherit;
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.inbox-approve:hover { background: #0d9488; color: #fff; border-color: #0d9488; }
+.inbox-approve + .inbox-state { margin-left: 4px; }
+.inbox-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.inbox-actions > span { font-size: 9.5px; line-height: 1.4; color: #6b7a90; }
+.inbox-approve-all {
+  flex: none;
+  border: none;
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: #0f766e;
+  color: #fff;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.inbox-approve-all:hover { background: #0d9488; }
 .inbox-list li.is-done > span:nth-child(2) {
   color: #94a3b8;
   text-decoration: line-through;

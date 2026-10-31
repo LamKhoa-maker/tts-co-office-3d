@@ -314,13 +314,14 @@ export function loadAIState(key) {
       return {
         date: raw.date,
         done: Array.isArray(raw.done) ? raw.done : [],
+        approved: Array.isArray(raw.approved) ? raw.approved : [],
         sentAt: raw.sentAt || null,
       };
     }
   } catch {
-    return { date: key, done: [], sentAt: null };
+    return { date: key, done: [], approved: [], sentAt: null };
   }
-  return { date: key, done: [], sentAt: null };
+  return { date: key, done: [], approved: [], sentAt: null };
 }
 
 export function saveAIState(s) {
